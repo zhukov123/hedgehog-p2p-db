@@ -265,7 +265,7 @@ The system should be understandable enough for community and university deployme
 The next design pass should produce:
 - component diagram
 - Rust crate layout
-- metadata schema
+- metadata schema (started in `p2p-nosql-metadata-plane.md`)
 - replication state machine
 - capacity-control policy
 - security model
