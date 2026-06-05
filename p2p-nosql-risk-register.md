@@ -332,18 +332,34 @@ Risk register changes:
 - Raised head-node overtrust, weak invite handling, missing canonical signatures, and loose revocation caching as top security risks.
 - Moved the next design decision to observability and admin operations against the now-canonical object/version/replica/capacity/security model.
 
+## 2026-06-05 03:05 UTC Severus Observability/Admin Review
+
+Accepted findings:
+- PostgreSQL metadata state is the operational source of truth, storage-agent reports are evidence, and outbox/audit logs are the timeline.
+- Metrics must align to object/version/replica/lease/repair/capacity/security states, while avoiding object/version IDs as metric labels.
+- Required admin pages before beta: cluster overview, objects/versions, replicas, repair, capacity, security/authority, and audit.
+- Required Grafana dashboards before beta: cluster SLO, replication health, capacity, storage agents, security, PostgreSQL, and outbox.
+- Critical alerts must cover replica deficits, PostgreSQL primary outage, PITR/WAL failure, revoked principal acceptance, stale outbox events, emergency capacity, and restore drill failure.
+- Admin actions must go through the same `metadata-core` transactions as normal protocol traffic.
+- Beta requires runbooks for repair backlog, capacity pressure, node revocation, head compromise, failed restore, and stale outbox events.
+
+Risk register changes:
+- Added `p2p-nosql-admin-observability-ops.md` as the canonical observability/admin slice.
+- Raised stale outbox, restore uncertainty, dashboard-derived authority, and admin bypasses as beta-blocking risks.
+- Moved the next design decision to implementation roadmap and Rust workspace sequencing.
+
 ## Next Design Decision To Resolve
 
-Define observability and admin operations against the canonical v1 model next.
+Define implementation roadmap and Rust workspace sequencing next.
 
 Required output:
-- metrics names aligned to object/version/replica states
-- admin dashboard pages and actions
-- audit query surfaces
-- incident runbooks
-- Grafana dashboards
-- alert thresholds
-- operator workflows for repair, revocation, capacity, and restore
+- crate-by-crate build order
+- first PostgreSQL migrations
+- metadata-core test harness
+- minimal local cluster
+- CLI workflows
+- beta exit criteria
+- GitHub issue backlog structure
 
-This is the highest leverage next step because the design now has enough state-machine detail to define operator visibility and response paths precisely.
+This is the highest leverage next step because the architecture now has enough stable boundaries to turn into implementation work.
 
