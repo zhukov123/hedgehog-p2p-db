@@ -1,5 +1,5 @@
 Exit code: 0
-Wall time: 0.5 seconds
+Wall time: 0.6 seconds
 Output:
 # P2P NoSQL Risk Register
 
@@ -28,9 +28,10 @@ Mitigations:
 - Keep peer-to-peer document database semantics as a separate future track unless explicitly reselected.
 - Rename metrics, runbooks, and admin pages where needed to distinguish object repair from document conflict replication.
 - Require every write-path design slice to state whether it depends on metadata quorum, local offline acceptance, or both.
+- Follow [p2p-nosql-implementation-roadmap.md](p2p-nosql-implementation-roadmap.md): build `hedgehog-metadata-core` and `hedgehog-metadata-pg` first, then storage agents, head nodes, repair, admin, observability, and local-cluster polish.
 
 Next decision:
-- Decide whether the current v1 target is the head-mediated encrypted object store or the earlier local-first document database, then mark the non-selected shape as deferred.
+- Keep the current v1 target as the head-mediated encrypted object store and treat local-first document database semantics as deferred unless explicitly reselected.
 
 ### 1. Metadata Plane Becomes The Real Control Plane Bottleneck
 
@@ -50,6 +51,7 @@ Mitigations:
 - Keep all metadata commands idempotent and replay-testable.
 - Define a degraded-mode policy that allows only safe reads and telemetry buffering when metadata quorum is unavailable.
 - Require tested failover, PITR, restore drills, migration rollback plans, and durable mutation outbox processing before beta.
+- Make the Milestone 1 beta blocker the real PostgreSQL migration set plus metadata-core transition tests before public API or storage protocol expansion.
 
 Next decision:
 - Pick the first PostgreSQL deployment posture: managed Postgres, self-hosted primary plus standby, or containerized dev-only Postgres with a clearly separate production plan.
