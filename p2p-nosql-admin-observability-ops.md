@@ -1,5 +1,5 @@
 Exit code: 0
-Wall time: 0.7 seconds
+Wall time: 0.5 seconds
 Output:
 # P2P NoSQL Admin Observability and Operations
 
@@ -10,6 +10,8 @@ This pass defines v1 observability, admin dashboard, alerts, audit queries, and 
 - storage-agent reports are evidence.
 - outbox and audit logs are the operational timeline.
 - dashboards are views, not authority.
+
+This slice is Milestone 6 in [p2p-nosql-implementation-roadmap.md](p2p-nosql-implementation-roadmap.md). It should not block metadata-core and PostgreSQL foundations, but it must be complete before beta.
 
 ## Metrics Taxonomy
 
