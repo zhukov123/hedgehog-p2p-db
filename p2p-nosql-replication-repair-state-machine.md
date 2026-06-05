@@ -1,5 +1,5 @@
 Exit code: 0
-Wall time: 0.6 seconds
+Wall time: 0.5 seconds
 Output:
 # P2P NoSQL Replication and Repair State Machine
 
@@ -252,12 +252,16 @@ Accepted findings:
 
 ## Next Unresolved Portion
 
-The next research slice should define the PostgreSQL schema and migration plan:
-- concrete tables
-- indexes and partial unique indexes
-- transaction patterns
-- outbox delivery semantics
-- row-locking strategy
-- migration and rollback policy
-- backup, PITR, and failover drills
+The PostgreSQL schema and migration slice is captured in `p2p-nosql-postgresql-schema-plan.md`.
+
+The capacity admission and repair-reserve slice is captured in `p2p-nosql-capacity-admission.md`.
+
+The next research slice should define security roots and protocol authority:
+- admin authority model
+- invitation issuance and revocation
+- signed envelope canonicalization
+- head-node authority limits
+- storage-agent key rotation
+- metadata privacy controls
+- audit trails and incident response
 
