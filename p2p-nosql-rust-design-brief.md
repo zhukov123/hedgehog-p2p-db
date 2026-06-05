@@ -1,3 +1,6 @@
+Exit code: 0
+Wall time: 0.8 seconds
+Output:
 # Rust-First P2P NoSQL Design Brief
 
 ## Goal
@@ -98,6 +101,11 @@ It should store:
 
 This plane is the brain of the system.
 
+V1 backend decision:
+- PostgreSQL is the default authoritative metadata store for the first production slice.
+- Use transactions, constraints, indexes, migrations, WAL durability, PITR, and rehearsed failover rather than building a custom consensus database immediately.
+- FoundationDB and Rust-native Raft remain later options if metadata scale, distribution, or product goals justify the operational cost.
+
 ## Rust Implementation Direction
 
 Rust should be the main programming language for:
@@ -117,7 +125,8 @@ Suggested Rust ecosystem building blocks:
 - metrics: `metrics`, `prometheus-client`, or OpenTelemetry Rust SDK
 - logging: `tracing`, `tracing-subscriber`
 - config: `figment` or plain typed config
-- storage: embedded engine such as `sled`, `redb`, `rocksdb` bindings, or custom log/index layers depending on requirements
+- metadata database access: `sqlx` with explicit migrations against PostgreSQL
+- storage-agent local data: file-per-object plus an embedded manifest/index store such as `redb`
 
 ## Required System Properties
 
@@ -138,6 +147,7 @@ Suggested Rust ecosystem building blocks:
 - payloads are encrypted on the client
 - storage nodes cannot inspect plaintext
 - head nodes should only see metadata necessary for routing and accounting
+- metadata remains sensitive: object sizes, timing, access patterns, placement, namespace shape, node capacity, and retention state can leak information even when payloads are encrypted
 
 ### Integrity
 
@@ -206,7 +216,7 @@ DNS should help distribute ingress, but the metadata plane must control the actu
 
 The network contains untrusted storage hosts on random PCs.
 
-The threat model should include:
+Threat model should include:
 - malicious storage nodes
 - malicious users trying to exhaust capacity
 - replay of old data
@@ -250,7 +260,7 @@ Admin dashboard should show:
 
 ## User Experience
 
-The client flow should be:
+The product flow should be:
 1. user creates an account
 2. user obtains a client key or recovery material
 3. user connects storage or installs a storage agent
@@ -266,7 +276,7 @@ The next design pass should produce:
 - component diagram
 - Rust crate layout
 - metadata schema (started in `p2p-nosql-metadata-plane.md`)
-- replication state machine
+- replication state machine (started in `p2p-nosql-replication-repair-state-machine.md`)
 - capacity-control policy
 - security model
 - admin API surface
@@ -289,21 +299,23 @@ Do not add these yet:
 ## Open Decisions
 
 - What is the canonical key recovery story?
-- Is the metadata plane one Raft cluster or sharded?
+- What exact PostgreSQL HA and backup topology is required for beta?
 - Should head nodes cache metadata or remain thin routers?
 - Should storage nodes use push, pull, or hybrid repair sync?
 - What exact on-disk store should Rust use initially?
 - How strict should quota enforcement be at the user and tenant level?
 - How do we prevent abuse from volunteer storage nodes?
+- What is the concrete PostgreSQL schema, index, migration, and outbox plan for the metadata state machine?
 
 ## Working Thesis
 
 The safest architecture is:
 - public head nodes for routing and coordination
-- a strongly consistent metadata service behind them
+- PostgreSQL as the strongly consistent v1 metadata service behind them
 - client-side encryption with user-owned keys
 - untrusted storage nodes that only hold ciphertext
 - whole-object replication
 - background re-replication and repair
 - hard admission control before storage exhaustion
 - Rust for the entire system stack
+
