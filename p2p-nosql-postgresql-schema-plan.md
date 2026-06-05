@@ -1,5 +1,5 @@
 Exit code: 0
-Wall time: 0.7 seconds
+Wall time: 0.5 seconds
 Output:
 # P2P NoSQL PostgreSQL Schema Plan
 
@@ -318,12 +318,14 @@ Accepted findings:
 
 The capacity admission and repair-reserve slice is captured in `p2p-nosql-capacity-admission.md`.
 
-The next design slice should define security roots and protocol authority:
-- admin authority model
-- invitation issuance and revocation
-- signed envelope canonicalization
-- head-node authority limits
-- storage-agent key rotation
-- metadata privacy controls
-- audit trails and incident response
+The security authority slice is captured in `p2p-nosql-security-authority.md`.
+
+The next design slice should define observability and admin operations:
+- metrics names aligned to object/version/replica states
+- admin dashboard pages and actions
+- audit query surfaces
+- incident runbooks
+- Grafana dashboards
+- alert thresholds
+- operator workflows for repair, revocation, capacity, and restore
 
