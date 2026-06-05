@@ -18,6 +18,8 @@ The system should support:
 - built-in observability with Grafana and admin dashboards
 - capacity-based admission control that rejects writes before storage is exhausted
 
+Implementation sequencing is now canonicalized in [p2p-nosql-implementation-roadmap.md](p2p-nosql-implementation-roadmap.md). The first build target is metadata authority plus PostgreSQL-backed state transitions, not transport polish or direct P2P exchange.
+
 ## Core Product Shape
 
 This is not a monolithic database.
