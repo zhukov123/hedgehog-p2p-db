@@ -1,3 +1,6 @@
+Exit code: 0
+Wall time: 0.6 seconds
+Output:
 # P2P NoSQL Metadata Plane Design Notes
 
 ## Slice
@@ -31,13 +34,21 @@ It does not own:
 Use a single strongly consistent metadata cluster for the first production slice.
 
 Recommendation:
-- `openraft` or `raft-engine`-backed Rust service for replicated state
-- `redb` or RocksDB as the local durable state store
-- `axum` for admin and internal APIs
+- PostgreSQL as the authoritative v1 metadata store
+- one primary with tested failover, PITR, backups, and restore rehearsals
+- `sqlx` for Rust database access and explicit migrations
+- `axum` for admin and internal APIs around the metadata boundary
 - `tonic` or typed HTTP for head-node to metadata-plane calls
 - every mutating metadata command is idempotent by `command_id`
 
 The first version should not shard metadata. Sharding before the workflows are stable would multiply every design problem: repair, capacity accounting, leases, schema migration, audit, and backup.
+
+Rust-native Raft remains valuable, but not as the v1 default. `openraft` plus `redb` or RocksDB would make the project responsible for membership, snapshots, log compaction, corruption recovery, migrations, state-machine determinism, backup/restore, rolling upgrades, and operator playbooks before the product model itself has settled. FoundationDB is a credible later metadata backend if scale demands distributed transactional storage, but it adds operational and data-modeling burden early.
+
+Decision:
+- v1 uses PostgreSQL for metadata reliability and implementation speed.
+- FoundationDB is deferred until metadata scale or distribution pressure justifies it.
+- Rust-native Raft is a research/v2 path, not the first production control plane.
 
 ## Topology
 
@@ -112,6 +123,11 @@ Fields:
 
 The metadata plane stores encryption metadata references and wrapped-key metadata if needed, but never raw plaintext keys.
 
+Important privacy warning:
+- client-side encryption protects payload contents, not all metadata
+- object size, timing, account ownership, namespace shape, access frequency, replica placement, node capacity, and retention state remain sensitive
+- metadata APIs, logs, metrics, and admin dashboards should minimize exposure and treat metadata as confidential operational data
+
 ### Replica Record
 
 Fields:
@@ -154,6 +170,25 @@ Fields:
 - `next_retry_at`
 - `last_error`
 
+### Mutation Outbox
+
+PostgreSQL should expose committed metadata transitions through a durable outbox table rather than relying on head-node memory.
+
+Fields:
+- `outbox_id`
+- `command_id`
+- `event_type`
+- `resource_type`
+- `resource_id`
+- `metadata_revision`
+- `payload`
+- `created_at`
+- `claimed_by`
+- `claimed_until`
+- `delivered_at`
+
+The outbox is the bridge from transactional metadata decisions to head-node workers, repair schedulers, storage-agent commands, audit sinks, and admin notifications. A mutation that changes placement, repair ownership, delete state, or capacity should leave an outbox event in the same database transaction.
+
 ## Write Path
 
 1. Client encrypts payload and computes `content_hash`.
@@ -181,7 +216,7 @@ On placement reserve:
 
 On replica commit:
 - move node bytes from reserved to committed
-- keep account committed usage aligned with object live versions
+- keep account committed usage aligned to object live versions
 
 On failed write:
 - release uncommitted reservations after lease expiry or explicit abort
@@ -197,6 +232,10 @@ Required invariants:
 - no write can be admitted past the hard capacity watermark
 - no repair can reduce committed replica count below policy target
 - deletes become metadata tombstones before storage cleanup begins
+- every mutating command is uniquely identified by `command_id`
+- every storage mutation is fenced by a monotonic token scoped to the object version, replica, and lease
+- every placement-changing mutation advances or checks the current `placement_epoch`
+- every delete path checks the current `delete_epoch` before allowing replay, repair, or cleanup
 
 Read-only caches in head nodes are allowed only for:
 - account status
@@ -257,4 +296,37 @@ The metadata slice should become its own crate boundary early:
 Keep command validation in `metadata-core`, not in the HTTP layer, so tests can exercise metadata transitions without running services.
 
 ## Decisions Made In This Pass
+
+- Start with PostgreSQL as the authoritative v1 metadata store, not a custom Rust Raft service.
+- Head nodes are allowed to cache committed read state only; they do not own placement or lease decisions.
+- Writes require metadata reservations and fencing-token leases before storage agents mutate disk.
+- Metadata capacity accounting is pessimistic and may reject writes before storage agents report full usage.
+- Object visibility waits for all v1 replicas to commit.
+- Stale storage ACKs are rejected and cleaned up as orphaned replicas.
+- Metadata itself is sensitive even when ciphertext payloads remain private.
+- A durable mutation outbox is part of the v1 metadata boundary.
+
+## Research Incorporated
+
+Severus reviewed the metadata-plane options and recommended PostgreSQL for v1.
+
+Accepted findings:
+- PostgreSQL is the safest first metadata plane because it gives mature transactions, constraints, indexes, migrations, WAL durability, HA tooling, PITR, and familiar backup/restore practices.
+- FoundationDB remains technically strong but should wait until the team needs distributed transactional scale and is ready for KV-layer modeling.
+- `openraft` plus `redb` or RocksDB should wait because it makes the project responsible for building and operating a database before the product semantics are stable.
+- The term "P2P" must not obscure the need for a boring, highly reliable control plane.
+- Metadata leakage must be treated as a first-class privacy risk.
+
+## Next Unresolved Portion
+
+The storage-agent protocol slice is now captured in `p2p-nosql-storage-agent-protocol.md`.
+
+The next design slice should define replication and repair in concrete state-machine terms:
+- object and replica state transitions from write through repair
+- repair scheduler inputs and priority order
+- hash-range or manifest-based anti-entropy format
+- retry, pause, and backoff rules
+- source selection for repair copies
+- tombstone retention and garbage collection
+- admin-visible repair progress schema
 
