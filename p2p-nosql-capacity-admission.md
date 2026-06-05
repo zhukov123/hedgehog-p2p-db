@@ -311,12 +311,14 @@ Accepted findings:
 
 ## Next Unresolved Portion
 
-The next design slice should define security roots and protocol authority:
-- admin authority model
-- invitation issuance and revocation
-- signed envelope canonicalization
-- head-node authority limits
-- storage-agent key rotation
-- metadata privacy controls
-- audit trails and incident response
+The security authority slice is captured in `p2p-nosql-security-authority.md`.
+
+The next design slice should define observability and admin operations:
+- metrics names aligned to object/version/replica states
+- admin dashboard pages and actions
+- audit query surfaces
+- incident runbooks
+- Grafana dashboards
+- alert thresholds
+- operator workflows for repair, revocation, capacity, and restore
 
