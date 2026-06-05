@@ -1,5 +1,5 @@
 Exit code: 0
-Wall time: 0.6 seconds
+Wall time: 0.5 seconds
 Output:
 # P2P NoSQL Metadata Plane Design Notes
 
@@ -319,14 +319,20 @@ Accepted findings:
 
 ## Next Unresolved Portion
 
-The storage-agent protocol slice is now captured in `p2p-nosql-storage-agent-protocol.md`.
+The storage-agent protocol slice is captured in `p2p-nosql-storage-agent-protocol.md`.
 
-The next design slice should define replication and repair in concrete state-machine terms:
-- object and replica state transitions from write through repair
-- repair scheduler inputs and priority order
-- hash-range or manifest-based anti-entropy format
-- retry, pause, and backoff rules
-- source selection for repair copies
-- tombstone retention and garbage collection
-- admin-visible repair progress schema
+The replication and repair state-machine slice is captured in `p2p-nosql-replication-repair-state-machine.md`.
+
+The PostgreSQL schema plan is captured in `p2p-nosql-postgresql-schema-plan.md`.
+
+The capacity admission and repair-reserve slice is captured in `p2p-nosql-capacity-admission.md`.
+
+The next design slice should define security roots and protocol authority:
+- admin authority model
+- invitation issuance and revocation
+- signed envelope canonicalization
+- head-node authority limits
+- storage-agent key rotation
+- metadata privacy controls
+- audit trails and incident response
 
