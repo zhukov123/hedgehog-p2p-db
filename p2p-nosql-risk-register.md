@@ -1,5 +1,5 @@
 Exit code: 0
-Wall time: 0.6 seconds
+Wall time: 0.5 seconds
 Output:
 # P2P NoSQL Risk Register
 
@@ -315,18 +315,35 @@ Risk register changes:
 - Raised multidimensional capacity and stale physical reports as top correctness risks.
 - Moved the next design decision to security roots and protocol authority.
 
+## 2026-06-05 03:00 UTC Severus Security Authority Review
+
+Accepted findings:
+- V1 should use PostgreSQL-backed authority with offline/root admin signing keys and short-lived operational admin tokens.
+- Head nodes are not trust roots. They authenticate, rate-limit, verify envelopes, forward mutations, and enforce obvious protocol checks, but PostgreSQL makes final decisions.
+- Privileged admin changes require signed envelopes, idempotency keys, scoped roles, and audit rows.
+- Invitations are one-time scoped bearer secrets with short expiry, secret hashes, policy hashes, revocation, and transactional acceptance.
+- Signed envelope canonicalization must be locked before implementation, preferably deterministic CBOR or strict deterministic protobuf rather than ad hoc JSON.
+- Storage-agent revocation increments a revocation epoch, revokes active keys/sessions, blocks new placement, and makes existing replicas suspect until verified or repaired.
+- Metadata privacy controls must cover logs, metrics, admin views, APIs, audit, and tracing.
+- Incident drills for compromised agents/admins, invite invalidation, head quarantine, revocation-cache rebuild, audit export, and PITR authority consistency are beta blockers.
+
+Risk register changes:
+- Added `p2p-nosql-security-authority.md` as the canonical security-authority slice.
+- Raised head-node overtrust, weak invite handling, missing canonical signatures, and loose revocation caching as top security risks.
+- Moved the next design decision to observability and admin operations against the now-canonical object/version/replica/capacity/security model.
+
 ## Next Design Decision To Resolve
 
-Define the security root and protocol authority model next.
+Define observability and admin operations against the canonical v1 model next.
 
 Required output:
-- admin authority model
-- invitation issuance and revocation
-- signed envelope canonicalization
-- head-node authority limits
-- storage-agent key rotation
-- metadata privacy controls
-- audit trails and incident response
+- metrics names aligned to object/version/replica states
+- admin dashboard pages and actions
+- audit query surfaces
+- incident runbooks
+- Grafana dashboards
+- alert thresholds
+- operator workflows for repair, revocation, capacity, and restore
 
-This is the highest leverage next step because storage agents are untrusted and head nodes must coordinate without becoming unlimited authorities.
+This is the highest leverage next step because the design now has enough state-machine detail to define operator visibility and response paths precisely.
 
