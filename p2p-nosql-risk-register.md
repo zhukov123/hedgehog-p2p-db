@@ -1,5 +1,5 @@
 Exit code: 0
-Wall time: 0.5 seconds
+Wall time: 0.6 seconds
 Output:
 # P2P NoSQL Risk Register
 
@@ -283,17 +283,50 @@ Risk register changes:
 - Raised stale worker completions, delete resurrection, and invalid durable replica counting as first-class correctness risks.
 - Moved the next design decision from abstract state-machine definition to concrete PostgreSQL schema, indexes, outbox semantics, and migration/failover plan.
 
+## 2026-06-05 02:45 UTC Severus PostgreSQL Schema Review
+
+Accepted findings:
+- The concrete v1 schema centers on `objects`, `object_versions`, `replicas`, `leases`, `repair_jobs`, `tombstones`, `idempotency_records`, and `outbox_events`.
+- PostgreSQL should enforce identity, uniqueness, non-negative fields, no duplicate active work, idempotency, foreign keys, and partial unique indexes for active write/repair paths.
+- Rust `metadata-core` should own legal state transitions, quorum semantics, placement policy, fencing interpretation, repair priority, and tombstone retention.
+- Avoid SQL triggers for the main state machine. Use explicit Rust transactions with row locks and deterministic tests.
+- Beta migrations should be forward-only, transactional where possible, and rollback through restore plus previous binary deployment.
+- Backup readiness must include WAL archiving, PITR to a named timestamp, weekly restore drills during beta, failover drills, outbox replay tests, and invariant checks after restore.
+
+Risk register changes:
+- Added `p2p-nosql-postgresql-schema-plan.md` as the concrete schema bridge from architecture to implementation.
+- Raised migration, restore, outbox replay, and stale fencing after failover as beta-blocking risks.
+- Moved the next design decision to exact capacity admission and repair-reserve formulas.
+
+## 2026-06-05 02:55 UTC Severus Capacity Review
+
+Accepted findings:
+- Capacity admission must be conservative and reservation-based.
+- PostgreSQL owns logical capacity reservations, while storage agents enforce physical local disk admission.
+- Raw aggregate free bytes are unsafe because placement diversity, node freshness, repair debt, temp amplification, deletion lag, tenant quota, and emergency reserve all matter.
+- Track separate buckets for committed bytes, write reservations, repair reservations, temp bytes, GC lag, emergency reserve, unhealthy bytes, and repair debt.
+- Effective free capacity must exclude reserved write, repair, temp, GC lag, emergency reserve, and placement-unavailable bytes.
+- Repair reserve should cover at least the largest single-node-loss repair need, a configured floor, or a percentage of healthy usable capacity.
+- Capacity pressure should prioritize delete markers, orphan/temp cleanup, tombstone-eligible GC, and minimum-durability repair before new writes.
+- Stale capacity reports make a node ineligible for new placement.
+
+Risk register changes:
+- Added `p2p-nosql-capacity-admission.md` as the canonical capacity slice.
+- Raised multidimensional capacity and stale physical reports as top correctness risks.
+- Moved the next design decision to security roots and protocol authority.
+
 ## Next Design Decision To Resolve
 
-Define the PostgreSQL schema and migration plan for the replication and repair state machine next.
+Define the security root and protocol authority model next.
 
 Required output:
-- concrete tables for objects, versions, replicas, leases, repair jobs, tombstones, idempotency records, and outbox events
-- indexes, partial unique indexes, and transactional update predicates
-- row-locking strategy for write, delete, placement, and repair lease decisions
-- migration and rollback policy
-- backup, PITR, and failover drills
-- admin-visible repair progress schema and query patterns
+- admin authority model
+- invitation issuance and revocation
+- signed envelope canonicalization
+- head-node authority limits
+- storage-agent key rotation
+- metadata privacy controls
+- audit trails and incident response
 
-This is the highest leverage next step because it turns the state-machine model into an implementable metadata core.
+This is the highest leverage next step because storage agents are untrusted and head nodes must coordinate without becoming unlimited authorities.
 
