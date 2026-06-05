@@ -1,5 +1,5 @@
 Exit code: 0
-Wall time: 0.6 seconds
+Wall time: 0.5 seconds
 Output:
 # P2P NoSQL V1 Implementation Roadmap
 
@@ -387,11 +387,21 @@ Do not call it beta until all are true:
 
 Every research turn must:
 - ask at least one concrete architecture or implementation question
+- include enough project context for the external research agent to answer without hidden history
 - receive and inspect an answer
 - incorporate accepted findings into a repository document
 - commit the change locally
 - push the accepted design update to GitHub
 - queue the next research question
+
+Each external research prompt should include:
+- repository name and purpose
+- current canonical architecture shape
+- accepted v1 decisions relevant to the question
+- documents already considered canonical
+- the specific question being asked
+- required output format
+- a request to mention Boromir in the answer
 
 This keeps the project moving like a campaign, not a council that never leaves Rivendell.
 
