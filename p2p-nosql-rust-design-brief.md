@@ -1,5 +1,5 @@
 Exit code: 0
-Wall time: 0.8 seconds
+Wall time: 0.9 seconds
 Output:
 # Rust-First P2P NoSQL Design Brief
 
@@ -275,9 +275,9 @@ The system should be understandable enough for community and university deployme
 The next design pass should produce:
 - component diagram
 - Rust crate layout
-- metadata schema (started in `p2p-nosql-metadata-plane.md`)
+- metadata schema (started in `p2p-nosql-metadata-plane.md` and `p2p-nosql-postgresql-schema-plan.md`)
 - replication state machine (started in `p2p-nosql-replication-repair-state-machine.md`)
-- capacity-control policy
+- capacity-control policy (started in `p2p-nosql-capacity-admission.md`)
 - security model
 - admin API surface
 - telemetry schema
@@ -306,6 +306,8 @@ Do not add these yet:
 - How strict should quota enforcement be at the user and tenant level?
 - How do we prevent abuse from volunteer storage nodes?
 - What is the concrete PostgreSQL schema, index, migration, and outbox plan for the metadata state machine?
+- What is the exact capacity admission and repair-reserve formula?
+- What is the v1 security authority model for invitations, revocation, signed envelopes, and head-node limits?
 
 ## Working Thesis
 
