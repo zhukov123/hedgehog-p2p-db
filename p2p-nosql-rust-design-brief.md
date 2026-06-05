@@ -1,5 +1,5 @@
 Exit code: 0
-Wall time: 0.5 seconds
+Wall time: 0.6 seconds
 Output:
 # Rust-First P2P NoSQL Design Brief
 
@@ -279,9 +279,9 @@ The next design pass should produce:
 - replication state machine (started in `p2p-nosql-replication-repair-state-machine.md`)
 - capacity-control policy (started in `p2p-nosql-capacity-admission.md`)
 - security model (started in `p2p-nosql-security-authority.md`)
-- admin API surface
-- telemetry schema
-- Grafana dashboard list
+- admin API surface (started in `p2p-nosql-admin-observability-ops.md`)
+- telemetry schema (started in `p2p-nosql-admin-observability-ops.md`)
+- Grafana dashboard list (started in `p2p-nosql-admin-observability-ops.md`)
 - container stack layout
 - failure-mode matrix
 
@@ -309,6 +309,7 @@ Do not add these yet:
 - What is the exact capacity admission and repair-reserve formula?
 - What is the v1 security authority model for invitations, revocation, signed envelopes, and head-node limits?
 - What should the admin dashboard, metrics taxonomy, alerts, and incident runbooks look like against the canonical v1 model?
+- What is the crate-by-crate implementation roadmap and beta exit plan?
 
 ## Working Thesis
 
