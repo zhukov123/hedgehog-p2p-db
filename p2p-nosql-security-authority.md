@@ -233,12 +233,14 @@ Accepted findings:
 
 ## Next Unresolved Portion
 
-The next design slice should define observability and admin operations against the now-canonical model:
-- metrics names aligned to object/version/replica states
-- admin dashboard pages and actions
-- audit query surfaces
-- incident runbooks
-- Grafana dashboards
-- alert thresholds
-- operator workflows for repair, revocation, capacity, and restore
+The observability and admin-operations slice is captured in `p2p-nosql-admin-observability-ops.md`.
+
+The next design slice should define implementation roadmap and Rust workspace sequencing:
+- crate-by-crate build order
+- first migrations
+- test harnesses
+- minimal local cluster
+- CLI workflows
+- beta exit criteria
+- issue backlog structure
 
