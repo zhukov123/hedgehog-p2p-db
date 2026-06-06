@@ -19,7 +19,7 @@ It is a distributed document / key-value / wide-column system with:
 - optional secondary indexes
 - multi-peer replication
 - conflict handling that is explicit and deterministic
-- security and observability as first-class features
+- strong security and observability
 
 ## Design Principles
 

@@ -1,6 +1,3 @@
-Exit code: 0
-Wall time: 0.5 seconds
-Output:
 # P2P NoSQL PostgreSQL Schema Plan
 
 ## Slice
@@ -328,4 +325,3 @@ The next design slice should define observability and admin operations:
 - Grafana dashboards
 - alert thresholds
 - operator workflows for repair, revocation, capacity, and restore
-

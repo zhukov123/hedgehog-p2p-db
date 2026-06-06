@@ -1,6 +1,3 @@
-Exit code: 0
-Wall time: 0.6 seconds
-Output:
 # P2P NoSQL Capacity Admission and Repair Reserve
 
 ## Slice
@@ -238,11 +235,16 @@ Reservation fields should include:
 - `placement_epoch`
 - `reservation_kind`: `write | repair | temp | gc_lag | emergency`
 - `bytes_reserved`
-- `state`: `pending | committed | released | expired`
+- `state`: `pending | reserved | streaming | finalizing | committed | expired | aborted | failed_cleanup_required`
 - `expires_at`
 - `idempotency_key`
 - `created_at`
 - `updated_at`
+
+These reservation states must stay aligned with `p2p-nosql-scaffold-contract.md`,
+`p2p-nosql-implementation-contract.md`, and the eventual `hedgehog-types`
+label metadata. Older `released` or `converted_to_repair` terminology is
+non-canonical for v1 implementation.
 
 Required constraints/checks:
 - reservation bytes must be positive
@@ -321,4 +323,3 @@ The next design slice should define observability and admin operations:
 - Grafana dashboards
 - alert thresholds
 - operator workflows for repair, revocation, capacity, and restore
-

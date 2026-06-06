@@ -95,6 +95,12 @@ From libp2p/IPFS:
 - NAT traversal
 - content-addressed or hash-verifiable transfer primitives
 
+From Grafana-style operations:
+- first-class metrics and dashboards
+- standard visualization stack
+- containerized observability
+- linkable admin surfaces for operators
+
 ## Biggest Architectural Difference
 
 The biggest difference between your target system and DynamoDB is this:

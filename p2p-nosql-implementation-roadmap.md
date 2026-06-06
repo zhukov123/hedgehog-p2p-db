@@ -1,6 +1,3 @@
-Exit code: 0
-Wall time: 0.5 seconds
-Output:
 # P2P NoSQL V1 Implementation Roadmap
 
 ## Slice
@@ -11,6 +8,7 @@ The guiding rule is simple: build the metadata authority and state machine first
 
 Inputs folded into this roadmap:
 - PostgreSQL is the v1 metadata authority.
+- The first implementation contract is frozen in [p2p-nosql-implementation-contract.md](p2p-nosql-implementation-contract.md): use `sqlx`, deterministic CBOR envelopes, canonical state labels, `redb` storage-agent manifests/journals, 64 MiB whole-object limit, explicit transfer classes, and an early generated local-cluster harness.
 - Object versions are immutable.
 - Replica, repair, lease, placement-epoch, delete-epoch, and fencing-token rules are canonical.
 - Capacity admission is transactional in metadata and checked again locally by storage agents.
@@ -34,7 +32,7 @@ This crate must stay boring and stable. Other crates should not invent their own
 
 Cryptographic helper crate:
 - envelope signing
-- canonical serialization for signed data
+- deterministic CBOR canonical serialization for signed data
 - key IDs and key metadata
 - invitation token verification helpers
 - encryption metadata helpers
@@ -82,7 +80,7 @@ Owns:
 - idempotency records
 - PostgreSQL integration tests
 
-Use `sqlx` or `tokio-postgres`; pick one before writing migrations and do not mix both in v1.
+Use `sqlx` for v1. Do not mix `sqlx` and `tokio-postgres` in service crates.
 
 ### 6. `hedgehog-storage-agent`
 
@@ -97,6 +95,11 @@ Participant-machine storage agent:
 - revocation handling
 
 The agent stores ciphertext and evidence. It is not metadata authority.
+
+Initial local storage contract:
+- file-per-object ciphertext
+- `redb` manifest and command journal
+- crash tests for temp-file fsync, atomic rename, duplicate command replay, duplicate final ACK replay, stale fencing rejection, and delete during in-flight write before service networking
 
 ### 7. `hedgehog-head`
 
@@ -157,6 +160,10 @@ Development harness:
 - starts repair worker
 - drives CLI workflows
 - supports chaos and restart tests
+
+Deployment contract details are now canonicalized in [p2p-nosql-deployment-stack.md](p2p-nosql-deployment-stack.md). Although this crate appears late in the crate list, a thin generated Compose harness should start earlier: as soon as `hedgehog-metadata-pg` can create tenants, datasets, nodes, and object write intents. Waiting until polished services exist would delay migration, health, metrics, and restart testing too long.
+
+The implementation contract pulls the first thin local-cluster harness into Milestone 1, before real upload streams exist.
 
 ## First PostgreSQL Migrations
 
@@ -220,6 +227,8 @@ The first reliable local cluster should include:
 - 1 repair worker
 - 1 admin/CLI process
 - optional second head node for idempotency, fencing, and concurrency tests
+
+The first deployment target is generated Docker Compose, not Kubernetes. The local stack includes PostgreSQL, a migrator, one head, three storage agents, one repair worker, admin API/UI, Prometheus, Grafana, and optional OpenTelemetry collector. PostgreSQL stays on the private control network; storage agents keep outbound-only connectivity; generated local secrets live in an ignored runtime directory.
 
 Required local-cluster workflow:
 
@@ -381,7 +390,80 @@ Do not call it beta until all are true:
 - all admin/security actions produce audit events
 - outbox lag and stuck events alert correctly
 - dashboards exist for object/version/replica/repair/capacity/security health
+- generated Compose local cluster can run lifecycle, restart, capacity-pressure, revocation, and restore drills
 - chaos tests cover head restart, storage-agent restart, repair-worker restart, and PostgreSQL failover simulation
+
+## 2026-06-05 04:23 UTC Deployment Stack Review
+
+Accepted design:
+- Compose is the first supported deployment target.
+- Kubernetes is deferred until health, metrics, config, and secret contracts are stable.
+- The standard local stack includes PostgreSQL, migrator, head, three storage agents, repair worker, admin API/UI, Prometheus, Grafana, and optional OpenTelemetry collector.
+- PostgreSQL is private to the control network and never directly exposed.
+- Storage agents remain outbound-only and own persistent data, journal, and temp volumes.
+- The migrator is a first-class service and uses the same migration path as CI.
+- Local-cluster generation belongs in the Rust workspace so integration tests, drills, dashboards, and secrets are reproducible.
+
+Risk review:
+- Deployment work cannot wait until the end of the crate roadmap. A thin local-cluster harness should exist once metadata-pg can create tenants, datasets, nodes, and write intents.
+- Static YAML alone will drift from code. Generate local Compose files from typed config and commit dashboard/provisioning sources.
+- Secrets must be generated into an ignored runtime directory for local development and provided explicitly for beta.
+- Health and readiness contracts need to be implemented before service behavior gets complicated, or restart and failure drills will become unreliable.
+
+Next decision:
+- Freeze the v1 implementation contract: choose `sqlx`, deterministic envelope encoding, canonical state glossary, write reservation lifecycle, max object size/transfer classes, and generated local-cluster file layout.
+
+## 2026-06-05 05:04 UTC Implementation Contract Review
+
+Accepted design:
+- PostgreSQL access uses `sqlx` in v1, with one migration path shared by CI, migrator service, CLI local cluster, and integration tests.
+- Signed envelopes use deterministic CBOR with golden vectors before head/client/admin signing workflows.
+- Canonical state labels live in `hedgehog-types` and must map to SQL values, metrics labels, admin filters, and display labels.
+- Write reservations have explicit lifecycle states from `pending` through `leased`, `streaming`, `committed`, release/expiry/conversion, and cleanup-required paths.
+- Storage agents start with file-per-object ciphertext plus `redb` manifest and journal.
+- V1 whole-object writes are capped at 64 MiB with small, medium, and large transfer classes.
+- A thin generated local-cluster harness moves into Milestone 1 as soon as metadata-pg can run migrations and create early write reservations.
+
+Risk review:
+- The next implementation work should be a contract package, not service glue: `hedgehog-types`, `hedgehog-crypto`, `hedgehog-metadata-core`, `hedgehog-metadata-pg`, and a thin local-cluster harness.
+- Storage-agent durability cannot wait for network behavior; manifest and journal crash tests are a beta blocker.
+- Transfer classes and object size limits are now part of capacity and repair correctness, not tuning polish.
+
+Next decision:
+- Write the v1 threat model table covering compromised heads, malicious storage agents, stolen admin keys, invitation leakage, stale cached authority, metadata privacy leakage, capacity-report manipulation, replayed envelopes, manifest corruption, and abusive tenants.
+
+## 2026-06-05 05:07 UTC Threat Model Review
+
+Accepted design:
+- The v1 threat model is captured in [p2p-nosql-threat-model.md](p2p-nosql-threat-model.md).
+- Threat rows now map actor, capability, target, trust boundary, prevention control, detection signal, and recovery/runbook.
+- The table covers compromised heads, malicious storage agents, stolen admin keys, leaked invitations, stale cached authority, metadata privacy leakage, false capacity reports, replayed envelopes, manifest corruption, abusive tenants, PostgreSQL operator errors, and Rust async cancellation bugs.
+
+Risk review:
+- The first service work must not allow head-local authority decisions. PostgreSQL-backed metadata workflows remain the only path for placement, leases, revocation, invitations, and write visibility.
+- Degraded-mode cache behavior is now the largest unresolved security/operations risk because it decides what happens when PostgreSQL is unavailable but heads still have stale authority records.
+- The threat model must become fixtures, not prose: replay vectors, compromised-head bypass tests, capacity-report anomalies, manifest corruption, restore/invariant checks, and cancellation-at-durable-boundary tests.
+
+Next decision:
+- Define the degraded-mode authority and cache policy table before implementing head-node metadata caches or outage behavior.
+
+## 2026-06-05 06:04 UTC Degraded-Mode Cache Policy Review
+
+Accepted design:
+- The degraded-mode authority policy is captured in [p2p-nosql-degraded-mode-cache-policy.md](p2p-nosql-degraded-mode-cache-policy.md).
+- Head nodes have explicit metadata-connectivity states: `normal`, `degraded_read_only`, `authority_stale`, and `recovering`.
+- PostgreSQL outages are read-mostly and fail-closed. Mutations, admin actions, invitations, capacity admission, write reservations, replica completions, repair leases, and authority-changing workflows are rejected.
+- Cached reads are allowed only for already committed, version-specific object versions while tenant, dataset, object visibility, placement, node status, routing, read-token, and revocation records are all fresh enough.
+- Revocation is asymmetric: cached deny can block immediately, but cached absence cannot prove allow after the record's max age.
+- Audit and outbox remain PostgreSQL authority. Heads may buffer denied/status events locally, but cannot allow privileged actions that depend on buffered audit.
+
+Risk review:
+- Latest reads during PostgreSQL outage remain dangerous because the cached head pointer may miss deletes, newer committed versions, or policy changes.
+- Short cache TTLs reduce outage read availability, but v1 chooses correctness and revocation safety over stale-read convenience.
+- Recovery needs hard gates: migrations current, invariant checks passed, outbox lag bounded, audit append working, and caches rebuilt from PostgreSQL.
+
+Next decision:
+- Define the Rust crate layout and first scaffold package before implementation begins: workspace members, ownership boundaries, feature flags, shared error/ID types, migration embedding, deterministic CBOR vector location, storage-agent manifest crash-test boundary, and local-cluster harness ownership.
 
 ## Research Loop Rule
 
@@ -405,3 +487,12 @@ Each external research prompt should include:
 
 This keeps the project moving like a campaign, not a council that never leaves Rivendell.
 
+## 2026-06-06 00:04 UTC State Label Reconciliation
+
+Accepted design:
+- `p2p-nosql-scaffold-contract.md` and `p2p-nosql-implementation-contract.md` have been reconciled on the same lower-case canonical implementation labels.
+- Until Rust code exists, the scaffold contract is the seed source for the validator. Once `hedgehog-types` lands, label metadata in that crate becomes the executable source of truth.
+- `cargo xtask validate-scaffold-contract` is the first validation command. The earlier `validate-labels` wording is retired.
+
+Next decision:
+- Define the `hedgehog-types` label metadata API and the `xtask` validator seed format, then make the validator fail on drift between docs, Rust enums, SQL values, metrics, dashboards, admin filters, and fixtures.

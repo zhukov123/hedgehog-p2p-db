@@ -128,3 +128,4 @@ If Grafana is part of the standard stack, the first-run experience should be bor
 - [Apache Cassandra monitoring](https://cassandra.apache.org/doc/latest/cassandra/managing/operating/metrics.html)
 - [DynamoDB Streams](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Streams.html)
 - [CouchDB documentation](https://docs.couchdb.org/_/downloads/en/stable/pdf/)
+

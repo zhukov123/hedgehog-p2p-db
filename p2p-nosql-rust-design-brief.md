@@ -1,6 +1,3 @@
-Exit code: 0
-Wall time: 0.6 seconds
-Output:
 # Rust-First P2P NoSQL Design Brief
 
 ## Goal
@@ -19,6 +16,8 @@ The system should support:
 - capacity-based admission control that rejects writes before storage is exhausted
 
 Implementation sequencing is now canonicalized in [p2p-nosql-implementation-roadmap.md](p2p-nosql-implementation-roadmap.md). The first build target is metadata authority plus PostgreSQL-backed state transitions, not transport polish or direct P2P exchange.
+
+The first implementation contract is now canonicalized in [p2p-nosql-implementation-contract.md](p2p-nosql-implementation-contract.md): `sqlx`, deterministic CBOR signed envelopes, shared state labels, explicit write reservations, `redb` storage-agent manifests/journals, a 64 MiB whole-object limit, transfer classes, and an early generated local-cluster harness.
 
 ## Core Product Shape
 
@@ -284,7 +283,10 @@ The next design pass should produce:
 - admin API surface (started in `p2p-nosql-admin-observability-ops.md`)
 - telemetry schema (started in `p2p-nosql-admin-observability-ops.md`)
 - Grafana dashboard list (started in `p2p-nosql-admin-observability-ops.md`)
-- container stack layout
+- container stack layout (started in `p2p-nosql-deployment-stack.md`)
+- first implementation contract (captured in `p2p-nosql-implementation-contract.md`)
+- threat model (captured in `p2p-nosql-threat-model.md`)
+- degraded-mode cache policy (captured in `p2p-nosql-degraded-mode-cache-policy.md`)
 - failure-mode matrix
 
 ## Non-Goals For Version 1
@@ -302,9 +304,8 @@ Do not add these yet:
 
 - What is the canonical key recovery story?
 - What exact PostgreSQL HA and backup topology is required for beta?
-- Should head nodes cache metadata or remain thin routers?
+- What is the exact Rust workspace and crate layout for the first scaffold?
 - Should storage nodes use push, pull, or hybrid repair sync?
-- What exact on-disk store should Rust use initially?
 - How strict should quota enforcement be at the user and tenant level?
 - How do we prevent abuse from volunteer storage nodes?
 - What is the concrete PostgreSQL schema, index, migration, and outbox plan for the metadata state machine?
@@ -312,6 +313,7 @@ Do not add these yet:
 - What is the v1 security authority model for invitations, revocation, signed envelopes, and head-node limits?
 - What should the admin dashboard, metrics taxonomy, alerts, and incident runbooks look like against the canonical v1 model?
 - What is the crate-by-crate implementation roadmap and beta exit plan?
+- How should the degraded-mode cache fixtures be represented in `hedgehog-metadata-core`, `hedgehog-metadata-pg`, and `hedgehog-head` tests?
 
 ## Working Thesis
 
@@ -324,4 +326,3 @@ The safest architecture is:
 - background re-replication and repair
 - hard admission control before storage exhaustion
 - Rust for the entire system stack
-

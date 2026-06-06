@@ -198,3 +198,49 @@ Deliverables:
 - Compose stack with three nodes, Prometheus, Grafana, and admin UI.
 - Prometheus scrape config.
 - Grafana provisioning config.
+- Empty dashboard shells wired to expected metric names.
+
+### Hour 3: Make Replication Observable
+
+Deliverables:
+- Replication queue metrics.
+- Per-peer lag metrics.
+- Conflict counter.
+- Basic replication status admin endpoint.
+- Grafana replication panel.
+
+### Hour 4: Make Security and Ops Visible
+
+Deliverables:
+- Auth failure metric.
+- Admin audit log.
+- Peer inventory endpoint.
+- Revocation list design.
+- Security dashboard shell.
+- First two runbooks: node down and replication lag.
+
+## Team Decisions To Make
+
+- Runtime language and storage engine.
+- libp2p implementation target.
+- Trust model and admin authority model.
+- Causal metadata strategy.
+- Whether indexes are replicated state, rebuilt local state, or both.
+- Whether deletes use fixed retention or repair-aware tombstone garbage collection.
+- Whether Grafana is required in all deployments or optional but bundled.
+- Whether the admin dashboard is local-only or remotely accessible.
+- Backup format and encryption scheme.
+- First supported deployment target: Compose, Kubernetes, or bare metal.
+
+## Production Readiness Gate
+
+The system is not world-ready until a new operator can:
+- Start a three-node cluster with one command.
+- See all nodes in the admin dashboard.
+- Open Grafana and inspect cluster health.
+- Kill one node and observe lag/repair behavior.
+- Restart the node and watch catch-up complete.
+- Revoke a peer and see replication stop.
+- Take a snapshot and restore onto a fresh node.
+- Follow a runbook without asking the authors.
+

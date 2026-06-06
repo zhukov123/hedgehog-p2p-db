@@ -1,6 +1,3 @@
-Exit code: 0
-Wall time: 0.5 seconds
-Output:
 # P2P NoSQL Metadata Plane Design Notes
 
 ## Slice
@@ -335,4 +332,3 @@ The next design slice should define security roots and protocol authority:
 - storage-agent key rotation
 - metadata privacy controls
 - audit trails and incident response
-
