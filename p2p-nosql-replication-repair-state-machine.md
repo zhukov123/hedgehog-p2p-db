@@ -5,7 +5,7 @@
 This pass defines the v1 replication and repair state machine for the Rust-first head-mediated encrypted object store.
 
 Assumptions:
-- PostgreSQL is the authoritative metadata plane.
+- metadata store is the authoritative metadata plane.
 - Storage agents are outbound-only blob holders and proof reporters.
 - Clients encrypt whole objects before upload.
 - Metadata owns object visibility, placement, repair ownership, fencing, and delete semantics.
@@ -13,7 +13,7 @@ Assumptions:
 
 ## Core Boundary
 
-PostgreSQL is the sole authority for:
+metadata store is the sole authority for:
 - object and version intent
 - current object head pointer
 - replica placement
@@ -42,31 +42,30 @@ Object versions are immutable. The system mutates state and head pointers, not p
 
 States:
 
-- `INITIATED`: client reserved an object/version id; not readable.
-- `COMMIT_PENDING`: metadata has expected digest, size, encryption envelope, and planned replicas; not readable.
-- `AVAILABLE`: readable version; minimum replication policy is satisfied.
-- `UNDER_REPLICATED`: readable, but below desired replica count; repair eligible.
-- `QUARANTINED`: digest disagreement, suspected corruption, or metadata conflict; not served through normal reads.
-- `DELETE_MARKER`: logical current-version delete; hides older versions from normal reads.
-- `GC_ELIGIBLE`: retention has passed and no live references or active jobs remain.
-- `PURGED`: terminal metadata state after blob delete jobs complete or are waived by policy.
+- `writing`: metadata has accepted a write intent; not readable.
+- `committed`: readable version; minimum replication policy is satisfied.
+- `under_replicated`: readable, but below desired replica count; repair eligible.
+- `quarantined`: digest disagreement, suspected corruption, or metadata conflict; not served through normal reads.
+- `delete_marker`: logical current-version delete; hides older versions from normal reads.
+- `gc_eligible`: retention has passed and no live references or active jobs remain.
+- `garbage_collected`: terminal metadata state after blob delete jobs complete or are waived by policy.
 
 Legal transitions:
 
-- `INITIATED -> COMMIT_PENDING -> AVAILABLE`
-- `AVAILABLE -> UNDER_REPLICATED -> AVAILABLE`
-- `AVAILABLE -> QUARANTINED`
-- `UNDER_REPLICATED -> QUARANTINED`
-- `AVAILABLE -> DELETE_MARKER`
-- `UNDER_REPLICATED -> DELETE_MARKER`
-- `QUARANTINED -> DELETE_MARKER`
-- `DELETE_MARKER -> GC_ELIGIBLE -> PURGED`
+- `writing -> committed`
+- `committed -> under_replicated -> committed`
+- `committed -> quarantined`
+- `under_replicated -> quarantined`
+- `committed -> delete_marker`
+- `under_replicated -> delete_marker`
+- `quarantined -> delete_marker`
+- `delete_marker -> gc_eligible -> garbage_collected`
 
 Rules:
 - v1 writes create new versions.
 - v1 deletes create delete markers with a new `version_id` and higher `delete_epoch`.
 - v1 should avoid in-place overwrites of object contents.
-- an object cannot become `AVAILABLE` unless verified healthy replicas meet minimum replica policy and placement constraints.
+- an object cannot become `committed` unless verified healthy replicas meet minimum replica policy and placement constraints.
 
 ## Replica States
 
@@ -74,34 +73,32 @@ Replica rows are scoped by `(object_id, version_id, node_id, placement_epoch)`.
 
 States:
 
-- `PLANNED`: placement selected in PostgreSQL; no blob expected yet.
-- `TRANSFER_ASSIGNED`: a specific worker or agent lease owns the upload/copy attempt and has a fencing token.
-- `UPLOADING`: ciphertext transfer is in progress.
-- `VERIFYING`: agent claims bytes exist; verifier checks digest, size, and manifest.
-- `HEALTHY`: counts toward replication.
-- `STALE`: belongs to an old placement epoch, old node assignment, or superseded policy.
-- `SUSPECT`: missed heartbeat, failed audit, or transient read failure.
-- `CORRUPT`: digest/proof mismatch; never serve.
-- `DELETE_PENDING`: blob should be removed or made unreadable.
-- `DELETED`: agent reported deletion or metadata accepted expiry waiver.
+- `planned`: placement selected in metadata store; no blob expected yet.
+- `streaming`: ciphertext transfer is in progress under a valid lease/fencing token.
+- `verifying`: agent claims bytes exist; verifier checks digest, size, and manifest.
+- `healthy`: counts toward replication.
+- `stale`: belongs to an old placement epoch, old node assignment, or superseded policy.
+- `suspect`: missed heartbeat, failed audit, or transient read failure.
+- `corrupt`: digest/proof mismatch; never serve.
+- `delete_pending`: blob should be removed or made unreadable.
+- `deleted`: agent reported deletion or metadata accepted expiry waiver.
 
 Legal transitions:
 
-- `PLANNED -> TRANSFER_ASSIGNED -> UPLOADING -> VERIFYING -> HEALTHY`
-- `HEALTHY -> SUSPECT -> HEALTHY`
-- `HEALTHY -> SUSPECT -> CORRUPT`
-- `HEALTHY -> SUSPECT -> DELETE_PENDING`
-- `HEALTHY -> STALE -> DELETE_PENDING -> DELETED`
-- `CORRUPT -> DELETE_PENDING -> DELETED`
-- `PLANNED -> DELETE_PENDING`
-- `TRANSFER_ASSIGNED -> DELETE_PENDING`
-- `UPLOADING -> DELETE_PENDING`
-- `VERIFYING -> DELETE_PENDING`
+- `planned -> streaming -> verifying -> healthy`
+- `healthy -> suspect -> healthy`
+- `healthy -> suspect -> corrupt`
+- `healthy -> suspect -> delete_pending`
+- `healthy -> stale -> delete_pending -> deleted`
+- `corrupt -> delete_pending -> deleted`
+- `planned -> delete_pending`
+- `streaming -> delete_pending`
+- `verifying -> delete_pending`
 
 Rules:
-- do not allow `CORRUPT -> HEALTHY`
+- do not allow `corrupt -> healthy`
 - reset corrupt data only through a new replica row or explicit admin repair path
-- do not serve from `CORRUPT`, `DELETE_PENDING`, `DELETED`, or a wrong delete epoch
+- do not serve from `corrupt`, `delete_pending`, `deleted`, or a wrong delete epoch
 - stale replicas may serve only if the object version is still live and read policy explicitly allows fallback
 
 ## Repair Job States
@@ -110,32 +107,32 @@ Repair jobs are deduped by `(object_id, version_id, repair_kind, placement_epoch
 
 States:
 
-- `QUEUED`
-- `LEASED`
-- `RUNNING`
-- `VERIFYING`
-- `COMPLETED`
-- `RETRY_WAIT`
-- `FAILED_FINAL`
-- `CANCELED_SUPERSEDED`
+- `pending`
+- `leased`
+- `running`
+- `verifying`
+- `completed`
+- `retry_wait`
+- `failed_final`
+- `canceled_superseded`
 
 Legal transitions:
 
-- `QUEUED -> LEASED -> RUNNING -> VERIFYING -> COMPLETED`
-- `LEASED -> RETRY_WAIT -> QUEUED`
-- `RUNNING -> RETRY_WAIT -> QUEUED`
-- `VERIFYING -> RETRY_WAIT -> QUEUED`
-- `LEASED -> FAILED_FINAL`
-- `RUNNING -> FAILED_FINAL`
-- `VERIFYING -> FAILED_FINAL`
-- `QUEUED -> CANCELED_SUPERSEDED`
-- `LEASED -> CANCELED_SUPERSEDED`
-- `RUNNING -> CANCELED_SUPERSEDED`
-- `VERIFYING -> CANCELED_SUPERSEDED`
+- `pending -> leased -> running -> verifying -> completed`
+- `leased -> retry_wait -> pending`
+- `running -> retry_wait -> pending`
+- `verifying -> retry_wait -> pending`
+- `leased -> failed_final`
+- `running -> failed_final`
+- `verifying -> failed_final`
+- `pending -> canceled_superseded`
+- `leased -> canceled_superseded`
+- `running -> canceled_superseded`
+- `verifying -> canceled_superseded`
 
 Priority order:
 
-1. `QUARANTINED` metadata conflicts or digest disagreement.
+1. `quarantined` metadata conflicts or digest disagreement.
 2. Below minimum durability threshold, for example `healthy_count < min_replicas`.
 3. Delete propagation for versions hidden by delete markers, especially under capacity pressure.
 4. Placement-policy violations such as wrong region, node class, or capacity pool.
@@ -151,7 +148,7 @@ These concepts are separate and should not be collapsed.
 `fencing_token`:
 - monotonic token issued when a worker leases replica or repair work
 - every completion callback must include it
-- PostgreSQL accepts the callback only if the token still matches the current lease row
+- metadata store accepts the callback only if the token still matches the current lease row
 - prevents old workers from marking stale work healthy after timeout or reassignment
 
 `placement_epoch`:
@@ -174,13 +171,13 @@ Completion validity rule:
 
 ```sql
 UPDATE replicas
-SET state = 'HEALTHY', verified_at = now()
+SET state = 'healthy', verified_at = now()
 WHERE version_id = $1
   AND node_id = $2
   AND fencing_token = $3
   AND placement_epoch = $4
   AND delete_epoch = $5
-  AND state = 'VERIFYING'
+  AND state = 'verifying'
 RETURNING replica_id;
 ```
 
@@ -191,12 +188,12 @@ The exact schema can differ, but the mutation must be guarded transactionally.
 Use delete markers, not immediate hard deletes.
 
 Rules:
-- normal delete creates `DELETE_MARKER` with a new `version_id` and `delete_epoch`
+- normal delete creates `delete_marker` with a new `version_id` and `delete_epoch`
 - normal reads return not found when the latest visible version is a delete marker
 - versioned reads may access older versions until retention expires, if authorization allows
 - tombstone retention must exceed replication lag, repair retry horizon, audit interval, client retry window, and clock-skew allowance
 - do not purge a tombstone while any replica or repair job with an older or equal delete epoch can still report completion
-- garbage collection proceeds through `GC_ELIGIBLE`, replica delete jobs, delete confirmation or expiry waiver, then `PURGED`
+- garbage collection proceeds through `gc_eligible`, replica delete jobs, delete confirmation or expiry waiver, then `garbage_collected`
 - capacity-pressure GC may delete old non-current blob replicas, but must keep enough metadata tombstone state to reject stale completions
 
 V1 default:
@@ -239,17 +236,17 @@ V1 should define a maximum object size and transfer class policy before implemen
 Severus reviewed the v1 replication and repair boundaries.
 
 Accepted findings:
-- PostgreSQL is the sole authority for object/version intent, placement, lifecycle, repair, fencing, and delete visibility.
+- metadata store is the sole authority for object/version intent, placement, lifecycle, repair, fencing, and delete visibility.
 - Storage agents are blob holders and proof reporters only.
 - Object versions are immutable; writes create versions and deletes create markers.
 - Fencing tokens, placement epochs, delete epochs, and idempotency keys serve different roles and all must be present in mutating callbacks.
 - Tombstones are correctness state, not just cleanup hints.
-- Every mutating callback must be transactionally guarded in PostgreSQL.
+- Every mutating callback must be transactionally guarded in metadata store.
 - The naive failure mode is accepting stale worker completions and accidentally resurrecting deleted data or counting invalid replicas as durable.
 
 ## Next Unresolved Portion
 
-The PostgreSQL schema and migration slice is captured in `p2p-nosql-postgresql-schema-plan.md`.
+The metadata store schema and migration slice is captured in `p2p-nosql-postgresql-schema-plan.md`.
 
 The capacity admission and repair-reserve slice is captured in `p2p-nosql-capacity-admission.md`.
 

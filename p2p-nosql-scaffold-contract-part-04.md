@@ -10,7 +10,7 @@ This file preserves ordered scaffold-contract content split from `p2p-nosql-scaf
 | `labels.canonical` | fixture manifest label `replica.REPAIRING` or `replica.repairing` |
 | `labels.uppercase_quarantine` | dashboard variable containing `UNDER_REPLICATED` |
 | `deps.direction` | `hedgehog-head` depending directly on `hedgehog-agent-store` |
-| `metadata.workflows` | public metadata-pg mutation function without a matrix workflow name |
+| `metadata.workflows` | public metadata-sql mutation function without a matrix workflow name |
 | `metadata.sql_scope` | `hedgehog-head` depending on `sqlx` outside tests |
 | `fixtures.present` | missing `late_ack_after_delete_epoch_bump` entry |
 | `pressure.policy` | pressure tests missing `emergency` |

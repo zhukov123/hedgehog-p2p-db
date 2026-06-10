@@ -1,23 +1,23 @@
-# P2P NoSQL Deployment Stack
+# P2P Object Store Deployment Stack
 
 ## Slice
 
 This pass defines the v1 deployment contract for the Rust-first, head-mediated encrypted object store.
 
-The deployment stack must be boring enough for local development, close enough to production to catch integration mistakes, and explicit about what is not yet a production topology. It is not the source of correctness. PostgreSQL metadata, signed authority records, storage-agent durable state, and `metadata-core` transitions remain the authority.
+The deployment stack must be boring enough for local development, close enough to production to catch integration mistakes, and explicit about what is not yet a production topology. It is not the source of correctness. The metadata store, signed authority records, storage-agent durable state, and `metadata-core` transitions remain the authority.
 
 ## Deployment Targets
 
-### Target 0: Local Developer Compose
+### Target 0: Local Developer Runtime
 
 Purpose:
 - exercise the full lifecycle on one workstation
-- run integration tests with real PostgreSQL transactions
+- run integration tests with real metadata transactions
 - inspect metrics, logs, audit rows, and dashboards
 - reproduce repair, restart, and capacity-pressure bugs
 
-Required services:
-- `postgres`
+Required processes/services:
+- `metadata-db` SQLite file
 - `head-1`
 - `storage-agent-1`
 - `storage-agent-2`
@@ -35,21 +35,21 @@ This is the first deployment artifact to build. It should be started by:
 hedgehog local-cluster up
 ```
 
-and backed by generated Compose files rather than hand-maintained operator state.
+and backed by generated runtime files rather than hand-maintained operator state. Compose may still be used for Prometheus, Grafana, or other supporting services.
 
-### Target 1: Single-Host Beta Compose
+### Target 1: Single-Host Beta Runtime
 
 Purpose:
 - run a real small deployment for a trusted group
 - validate backup, restore, alerts, dashboards, and runbooks
 - keep operational surface small before Kubernetes exists
 
-Differences from local developer Compose:
-- PostgreSQL data volume is persistent and backed up
+Differences from local developer runtime:
+- metadata store data volume is persistent and backed up
 - storage-agent volumes are persistent and size-limited
 - admin endpoints require signed admin envelopes and mTLS or a private management network
 - Grafana and Prometheus are protected behind admin auth
-- WAL archiving and restore drills are mandatory
+- backup archiving and restore drills are mandatory
 - secrets are mounted from files or an external secret manager, not committed `.env` defaults
 
 This target is acceptable for beta only if the project can rehearse restore, node revocation, storage-agent restart, and repair backlog recovery.
@@ -60,19 +60,19 @@ Purpose:
 - document how production should be operated even before Kubernetes manifests are shipped
 
 Minimum production posture:
-- managed PostgreSQL or self-hosted primary plus standby with WAL archiving and PITR
+- production SQL metadata backend, likely PostgreSQL, once the deferred backend track is accepted
 - at least two head nodes behind a TCP/HTTP load balancer
-- repair workers as horizontally scalable stateless processes with PostgreSQL leases
+- repair workers as horizontally scalable stateless processes with metadata store leases
 - storage agents on participant machines, usually outside the server network, maintaining outbound control sessions
 - Prometheus-compatible metrics scraping and Grafana dashboards
 - central log sink or OpenTelemetry collector
 - separate admin network or strong admin auth boundary
 
-Kubernetes can wait until the Compose contract, health endpoints, secret layout, and dashboard provisioning are stable.
+Kubernetes can wait until the local runtime contract, health endpoints, secret layout, and dashboard provisioning are stable.
 
-## Compose Service Contract
+## Runtime Service Contract
 
-### `postgres`
+### `metadata-db`
 
 Owns:
 - authoritative metadata
@@ -83,13 +83,14 @@ Owns:
 - audit events
 
 Required configuration:
-- named persistent volume
-- health check using a real SQL query
+- SQLite database path in the ignored runtime directory for local development
+- persistent metadata path for beta deployments
+- health check using a real SQL query through `hedgehog-metadata-sql`
 - migration runner dependency before heads start serving writes
-- WAL archiving hook in beta target
+- backup/export hook in beta target
 
 Must expose metrics through one of:
-- PostgreSQL exporter sidecar
+- metadata store exporter sidecar
 - managed service metrics bridge
 - direct dashboard data source only for local development
 
@@ -100,10 +101,10 @@ Runs once per stack start before mutable services accept traffic.
 Rules:
 - use the same `sqlx` migration set as CI
 - fail the stack if migrations fail
-- record migration version in PostgreSQL
+- record migration version in metadata store
 - never run destructive cleanup implicitly
 
-The migrator should exist even in local Compose so developers see migration failures before service failures.
+The migrator should exist even in the local runtime so developers see migration failures before service failures.
 
 ### `head-1`
 
@@ -153,7 +154,7 @@ Required volumes per agent:
 - `journal`
 - `temp`
 
-For local Compose, volume names should include the cluster name and agent id so restart tests do not silently share state across different clusters.
+For local runtime, volume names should include the cluster name and agent id so restart tests do not silently share state across different clusters.
 
 Required local limits:
 - max usable bytes
@@ -162,7 +163,7 @@ Required local limits:
 - max repair streams
 - v1 max object size
 
-The agent must be able to restart with only its local volumes and PostgreSQL metadata reconciliation. No in-memory command result may be required for correctness.
+The agent must be able to restart with only its local volumes and metadata store reconciliation. No in-memory command result may be required for correctness.
 
 ### `repair-worker`
 
@@ -179,7 +180,7 @@ Required controls:
 - queue starvation threshold
 - repair pause switch
 
-The worker is stateless except for PostgreSQL leases and idempotency keys.
+The worker is stateless except for metadata store leases and idempotency keys.
 
 ### `admin-api` and `admin-ui`
 
@@ -192,13 +193,13 @@ Own:
 
 Rules:
 - admin mutations call the same metadata transactions as normal protocol operations
-- no dashboard action may patch PostgreSQL directly
+- no dashboard action may patch metadata store directly
 - admin UI should show exact blockers from metadata state: quorum, quota, watermarks, revocation, stale capacity, repair reserve, stale fencing, or migration lock
 
 ### `prometheus`
 
 Owns:
-- scraping head, repair-worker, admin-api, storage-agent, PostgreSQL exporter, and optional collector metrics
+- scraping head, repair-worker, admin-api, storage-agent, metadata store exporter, and optional collector metrics
 - alert rules for beta gates
 
 Required local scrape targets:
@@ -210,10 +211,10 @@ storage-agent-2:9100
 storage-agent-3:9100
 repair-worker:9100
 admin-api:9100
-postgres-exporter:9187
+metadata-exporter:9187
 ```
 
-The exact port can change, but all Rust services should use one conventional metrics port in local Compose unless there is a strong reason not to.
+The exact port can change, but all Rust services should use one conventional metrics port in local runtime unless there is a strong reason not to.
 
 ### `grafana`
 
@@ -230,7 +231,7 @@ Minimum provisioned dashboards:
 - Capacity
 - Storage Agents
 - Security
-- PostgreSQL
+- metadata store
 - Outbox
 
 ### `otel-collector`
@@ -244,13 +245,13 @@ Prometheus metrics remain the minimum observability path. The project should not
 
 ## Network Layout
 
-Local Compose networks:
+Local runtime networks:
 - `hedgehog-public`: client, admin UI, Grafana, and exposed head/admin ports
-- `hedgehog-control`: head, repair worker, admin API, PostgreSQL, Prometheus
+- `hedgehog-control`: head, repair worker, admin API, metadata store, Prometheus
 - `hedgehog-agent`: storage-agent outbound sessions to head
 
 Rules:
-- PostgreSQL is never on the public network.
+- metadata store is never on the public network.
 - Storage agents do not need inbound public ports.
 - Admin API is not public in beta unless protected by the security-authority model.
 - Grafana is operator-facing only.
@@ -267,8 +268,8 @@ hedgehog local-cluster reset
 
 The reset command must be loud and recoverable where practical. It should not be part of normal `up` or `down`.
 
-Persistent volumes:
-- `postgres-data`
+Persistent volumes/files:
+- `metadata-db`
 - `storage-agent-1-data`
 - `storage-agent-1-journal`
 - `storage-agent-1-temp`
@@ -282,7 +283,7 @@ Persistent volumes:
 - `grafana-data`
 
 Beta backup requirements:
-- PostgreSQL base backup plus WAL archive
+- metadata store base backup plus backup archive
 - admin-exported audit evidence bundle
 - Grafana dashboard source in git
 - Prometheus data can be disposable if dashboards and alert rules are reconstructable
@@ -296,7 +297,7 @@ Local cluster generated files:
 - head node identity
 - storage-agent identities
 - invitation tokens
-- PostgreSQL credentials
+- metadata database path and file permissions
 - Grafana local admin password
 
 Rules:
@@ -333,10 +334,10 @@ Do not hide role-specific behavior behind vague image defaults.
 `/health/ready` means the service can safely accept its role's traffic.
 
 Readiness requirements:
-- head: PostgreSQL reachable, migrations current, authority cache loaded within max age, outbound storage-agent coordinator active
+- head: metadata store reachable, migrations current, authority cache loaded within max age, outbound storage-agent coordinator active
 - storage-agent: data/journal/temp volumes writable, manifest opened, local capacity limits loaded, outbound session established or retrying
-- repair-worker: PostgreSQL reachable, migrations current, can acquire or observe leases, repair not administratively paused unless readiness explicitly reports paused
-- admin-api: PostgreSQL reachable, authority policy loaded, audit writes available
+- repair-worker: metadata store reachable, migrations current, can acquire or observe leases, repair not administratively paused unless readiness explicitly reports paused
+- admin-api: metadata store reachable, authority policy loaded, audit writes available
 
 The local-cluster harness should fail fast if readiness never converges.
 
@@ -368,10 +369,10 @@ The local deployment must make these drills easy:
 - restart storage agent with pending journal results
 - kill repair worker during repair
 - kill head during upload coordination
-- pause PostgreSQL and verify write rejection/read degraded behavior
+- pause metadata store and verify write rejection/read degraded behavior
 - fill a storage-agent temp volume
 - revoke a node and watch repair enqueue
-- restore PostgreSQL into a new local cluster
+- restore metadata store into a new local cluster
 
 Each drill needs:
 - CLI command
@@ -383,20 +384,20 @@ Each drill needs:
 ## Implementation Order
 
 1. Add `hedgehog-local-cluster` config generation before polished services exist.
-2. Add PostgreSQL plus migrator Compose skeleton.
+2. Add SQLite metadata store plus migrator runtime skeleton.
 3. Add fake health/metrics endpoints for planned Rust binaries.
 4. Add Prometheus scrape config and empty Grafana dashboards wired to canonical metric names.
 5. Add storage-agent persistent volumes and size limits.
 6. Add restart and kill drills once storage-agent journal code exists.
-7. Add PITR/restore drill once real migrations and audit/outbox tables exist.
+7. Add restore/restore drill once real migrations and audit/outbox tables exist.
 
 This means local deployment work starts earlier than its crate position in the roadmap suggests. The harness can be thin at first, but it should exist while metadata transactions are being built.
 
 ## Decisions Locked
 
-- Compose is the first supported deployment target.
+- Generated local runtime is the first supported deployment target.
 - Kubernetes is deferred until health, metrics, config, and secret contracts are stable.
-- PostgreSQL is private to the control network and never directly exposed.
+- metadata store is private to the control network and never directly exposed.
 - Grafana and Prometheus are bundled in the standard local stack.
 - OpenTelemetry collector is optional for v1 local development.
 - Storage agents keep outbound-only connectivity and persistent local volumes.
@@ -406,7 +407,7 @@ This means local deployment work starts earlier than its crate position in the r
 ## Next Unresolved Portion
 
 Before implementation begins, write the v1 implementation contract that ties this deployment stack to the first crates:
-- choose `sqlx` explicitly for PostgreSQL access unless a blocker is found
+- choose `sqlx` explicitly for metadata store access unless a blocker is found
 - choose deterministic envelope encoding and golden-vector layout
 - publish the canonical state glossary mapping design states to Rust enum names, SQL values, metric labels, and admin labels
 - define write reservation lifecycle states and expiry rules

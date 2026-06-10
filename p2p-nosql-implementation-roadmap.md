@@ -1,4 +1,4 @@
-# P2P NoSQL V1 Implementation Roadmap
+# P2P Object Store V1 Implementation Roadmap
 
 ## Slice
 
@@ -7,8 +7,8 @@ This pass turns the canonical architecture into an implementation sequence.
 The guiding rule is simple: build the metadata authority and state machine first. Do not start with the storage-agent protocol, P2P transport, or polished API surface. If the metadata rules are vague, every later component will encode slightly different semantics, and repair becomes a data-loss risk instead of a safety mechanism.
 
 Inputs folded into this roadmap:
-- PostgreSQL is the v1 metadata authority.
-- The first implementation contract is frozen in [p2p-nosql-implementation-contract.md](p2p-nosql-implementation-contract.md): use `sqlx`, deterministic CBOR envelopes, canonical state labels, `redb` storage-agent manifests/journals, 64 MiB whole-object limit, explicit transfer classes, and an early generated local-cluster harness.
+- SQLite is the v1-alpha metadata authority.
+- The first implementation contract is frozen in [p2p-nosql-implementation-contract.md](p2p-nosql-implementation-contract.md): use `sqlx` with SQLite first, deterministic CBOR envelopes, canonical state labels, `redb` storage-agent manifests/journals, 64 MiB whole-object limit, explicit transfer classes, and an early generated local-cluster harness.
 - Object versions are immutable.
 - Replica, repair, lease, placement-epoch, delete-epoch, and fencing-token rules are canonical.
 - Capacity admission is transactional in metadata and checked again locally by storage agents.
@@ -44,7 +44,7 @@ Payload encryption remains client-side. This crate may define metadata needed to
 Configuration crate:
 - node config
 - tenant and dataset limits
-- PostgreSQL DSN handling
+- metadata database path/DSN handling
 - security root config
 - capacity reserve policy
 - local-cluster config
@@ -64,23 +64,23 @@ Owns:
 - capacity admission math
 - policy validation
 
-This crate is the heart of the system. PostgreSQL enforces durable constraints, but `metadata-core` defines legal semantic moves.
+This crate is the heart of the system. The SQL metadata store enforces durable constraints, but `metadata-core` defines legal semantic moves.
 
-### 5. `hedgehog-metadata-pg`
+### 5. `hedgehog-metadata-sql`
 
-PostgreSQL implementation of metadata authority.
+SQLite-first SQL implementation of metadata authority.
 
 Owns:
 - migrations
 - transactional workflows
-- row locking
-- optional advisory locks
+- transaction boundaries
+- guarded updates
 - outbox writes
 - audit event writes
 - idempotency records
-- PostgreSQL integration tests
+- SQLite integration tests
 
-Use `sqlx` for v1. Do not mix `sqlx` and `tokio-postgres` in service crates.
+Use `sqlx` with SQLite for v1-alpha. Do not introduce backend-specific SQL clients in service crates.
 
 ### 6. `hedgehog-storage-agent`
 
@@ -154,18 +154,18 @@ Shared observability crate:
 ### 12. `hedgehog-local-cluster`
 
 Development harness:
-- starts PostgreSQL
+- creates or opens the SQLite metadata database
 - starts one or more head nodes
 - starts storage agents
 - starts repair worker
 - drives CLI workflows
 - supports chaos and restart tests
 
-Deployment contract details are now canonicalized in [p2p-nosql-deployment-stack.md](p2p-nosql-deployment-stack.md). Although this crate appears late in the crate list, a thin generated Compose harness should start earlier: as soon as `hedgehog-metadata-pg` can create tenants, datasets, nodes, and object write intents. Waiting until polished services exist would delay migration, health, metrics, and restart testing too long.
+Deployment contract details are now canonicalized in [p2p-nosql-deployment-stack.md](p2p-nosql-deployment-stack.md). Although this crate appears late in the crate list, a thin generated Compose harness should start earlier: as soon as `hedgehog-metadata-sql` can create tenants, datasets, nodes, and object write intents. Waiting until polished services exist would delay migration, health, metrics, and restart testing too long.
 
 The implementation contract pulls the first thin local-cluster harness into Milestone 1, before real upload streams exist.
 
-## First PostgreSQL Migrations
+## First SQLite Migrations
 
 Write migrations in this order:
 
@@ -183,7 +183,7 @@ Write migrations in this order:
 12. capacity reservation tables, if the reserve model cannot be fully derived from object/version/replica rows
 
 Early indexes and constraints:
-- unique `objects(tenant_id, dataset_id, object_key)`
+- unique `objects(tenant_id, dataset_id, object_lookup_hash)` where `object_lookup_hash` is not null
 - unique `object_versions(object_id, version_seq)`
 - partial unique current/live version index
 - unique `replicas(version_id, node_id)`
@@ -216,19 +216,19 @@ Core invariant tests:
 - repair never reduces durability while trying to improve it
 - GC never deletes a replica still referenced by a live version or retained tombstone
 
-Mirror these scenarios in `hedgehog-metadata-pg` integration tests using real PostgreSQL transactions.
+Mirror these scenarios in `hedgehog-metadata-sql` integration tests using real SQLite transactions.
 
 ## Minimal Local Cluster
 
 The first reliable local cluster should include:
-- 1 PostgreSQL instance
+- 1 SQLite metadata database
 - 1 head node
 - 3 storage agents
 - 1 repair worker
 - 1 admin/CLI process
 - optional second head node for idempotency, fencing, and concurrency tests
 
-The first deployment target is generated Docker Compose, not Kubernetes. The local stack includes PostgreSQL, a migrator, one head, three storage agents, one repair worker, admin API/UI, Prometheus, Grafana, and optional OpenTelemetry collector. PostgreSQL stays on the private control network; storage agents keep outbound-only connectivity; generated local secrets live in an ignored runtime directory.
+The first deployment target is a generated local-cluster runtime, with Compose only for services that benefit from containers. The local stack includes a SQLite metadata database, a migrator, one head, three storage agents, one repair worker, admin API/UI, Prometheus, Grafana, and optional OpenTelemetry collector. The metadata database lives in an ignored runtime directory; storage agents keep outbound-only connectivity; generated local secrets also live in ignored runtime state.
 
 Required local-cluster workflow:
 
@@ -295,7 +295,7 @@ Scope:
 ### Milestone 1: Metadata Schema and Core State Machine
 
 Scope:
-- PostgreSQL migrations
+- SQLite migrations
 - metadata-core transitions
 - SQL constraints
 - integration tests
@@ -351,7 +351,7 @@ Scope:
 
 Scope:
 - chaos tests
-- PITR restore
+- metadata restore
 - failover drill
 - load tests
 - security review
@@ -361,7 +361,7 @@ Scope:
 
 Use:
 - `area:metadata`
-- `area:postgres`
+- `area:metadata-sql`
 - `area:storage-agent`
 - `area:head`
 - `area:repair`
@@ -380,7 +380,7 @@ Use:
 
 Do not call it beta until all are true:
 - full put/get/delete/repair/GC lifecycle works in local cluster
-- PostgreSQL PITR restore has been tested from backup
+- SQLite metadata restore has been tested from backup/export
 - metadata migrations have rollback or forward-fix policy documented
 - repair backlog drains after one storage-agent failure
 - capacity pressure blocks new writes before repair reserve is consumed
@@ -391,21 +391,21 @@ Do not call it beta until all are true:
 - outbox lag and stuck events alert correctly
 - dashboards exist for object/version/replica/repair/capacity/security health
 - generated Compose local cluster can run lifecycle, restart, capacity-pressure, revocation, and restore drills
-- chaos tests cover head restart, storage-agent restart, repair-worker restart, and PostgreSQL failover simulation
+- chaos tests cover head restart, storage-agent restart, repair-worker restart, and metadata restart/restore simulation
 
 ## 2026-06-05 04:23 UTC Deployment Stack Review
 
 Accepted design:
 - Compose is the first supported deployment target.
 - Kubernetes is deferred until health, metrics, config, and secret contracts are stable.
-- The standard local stack includes PostgreSQL, migrator, head, three storage agents, repair worker, admin API/UI, Prometheus, Grafana, and optional OpenTelemetry collector.
-- PostgreSQL is private to the control network and never directly exposed.
+- The standard local stack includes SQLite metadata, migrator, head, three storage agents, repair worker, admin API/UI, Prometheus, Grafana, and optional OpenTelemetry collector.
+- SQLite metadata lives in local runtime storage and is never exposed as a network service.
 - Storage agents remain outbound-only and own persistent data, journal, and temp volumes.
 - The migrator is a first-class service and uses the same migration path as CI.
 - Local-cluster generation belongs in the Rust workspace so integration tests, drills, dashboards, and secrets are reproducible.
 
 Risk review:
-- Deployment work cannot wait until the end of the crate roadmap. A thin local-cluster harness should exist once metadata-pg can create tenants, datasets, nodes, and write intents.
+- Deployment work cannot wait until the end of the crate roadmap. A thin local-cluster harness should exist once metadata-sql can create tenants, datasets, nodes, and write intents.
 - Static YAML alone will drift from code. Generate local Compose files from typed config and commit dashboard/provisioning sources.
 - Secrets must be generated into an ignored runtime directory for local development and provided explicitly for beta.
 - Health and readiness contracts need to be implemented before service behavior gets complicated, or restart and failure drills will become unreliable.
@@ -416,16 +416,16 @@ Next decision:
 ## 2026-06-05 05:04 UTC Implementation Contract Review
 
 Accepted design:
-- PostgreSQL access uses `sqlx` in v1, with one migration path shared by CI, migrator service, CLI local cluster, and integration tests.
+- SQLite access uses `sqlx` in v1-alpha, with one migration path shared by CI, migrator service, CLI local cluster, and integration tests.
 - Signed envelopes use deterministic CBOR with golden vectors before head/client/admin signing workflows.
 - Canonical state labels live in `hedgehog-types` and must map to SQL values, metrics labels, admin filters, and display labels.
 - Write reservations have explicit lifecycle states from `pending` through `leased`, `streaming`, `committed`, release/expiry/conversion, and cleanup-required paths.
 - Storage agents start with file-per-object ciphertext plus `redb` manifest and journal.
 - V1 whole-object writes are capped at 64 MiB with small, medium, and large transfer classes.
-- A thin generated local-cluster harness moves into Milestone 1 as soon as metadata-pg can run migrations and create early write reservations.
+- A thin generated local-cluster harness moves into Milestone 1 as soon as metadata-sql can run migrations and create early write reservations.
 
 Risk review:
-- The next implementation work should be a contract package, not service glue: `hedgehog-types`, `hedgehog-crypto`, `hedgehog-metadata-core`, `hedgehog-metadata-pg`, and a thin local-cluster harness.
+- The next implementation work should be a contract package, not service glue: `hedgehog-types`, `hedgehog-crypto`, `hedgehog-metadata-core`, `hedgehog-metadata-sql`, and a thin local-cluster harness.
 - Storage-agent durability cannot wait for network behavior; manifest and journal crash tests are a beta blocker.
 - Transfer classes and object size limits are now part of capacity and repair correctness, not tuning polish.
 
@@ -437,11 +437,11 @@ Next decision:
 Accepted design:
 - The v1 threat model is captured in [p2p-nosql-threat-model.md](p2p-nosql-threat-model.md).
 - Threat rows now map actor, capability, target, trust boundary, prevention control, detection signal, and recovery/runbook.
-- The table covers compromised heads, malicious storage agents, stolen admin keys, leaked invitations, stale cached authority, metadata privacy leakage, false capacity reports, replayed envelopes, manifest corruption, abusive tenants, PostgreSQL operator errors, and Rust async cancellation bugs.
+- The table covers compromised heads, malicious storage agents, stolen admin keys, leaked invitations, stale cached authority, metadata privacy leakage, false capacity reports, replayed envelopes, manifest corruption, abusive tenants, metadata operator errors, and Rust async cancellation bugs.
 
 Risk review:
-- The first service work must not allow head-local authority decisions. PostgreSQL-backed metadata workflows remain the only path for placement, leases, revocation, invitations, and write visibility.
-- Degraded-mode cache behavior is now the largest unresolved security/operations risk because it decides what happens when PostgreSQL is unavailable but heads still have stale authority records.
+- The first service work must not allow head-local authority decisions. SQLite-backed metadata workflows remain the only path for placement, leases, revocation, invitations, and write visibility.
+- Degraded-mode cache behavior is now the largest unresolved security/operations risk because it decides what happens when the metadata store is unavailable but heads still have stale authority records.
 - The threat model must become fixtures, not prose: replay vectors, compromised-head bypass tests, capacity-report anomalies, manifest corruption, restore/invariant checks, and cancellation-at-durable-boundary tests.
 
 Next decision:
@@ -452,15 +452,15 @@ Next decision:
 Accepted design:
 - The degraded-mode authority policy is captured in [p2p-nosql-degraded-mode-cache-policy.md](p2p-nosql-degraded-mode-cache-policy.md).
 - Head nodes have explicit metadata-connectivity states: `normal`, `degraded_read_only`, `authority_stale`, and `recovering`.
-- PostgreSQL outages are read-mostly and fail-closed. Mutations, admin actions, invitations, capacity admission, write reservations, replica completions, repair leases, and authority-changing workflows are rejected.
+- metadata outages are read-mostly and fail-closed. Mutations, admin actions, invitations, capacity admission, write reservations, replica completions, repair leases, and authority-changing workflows are rejected.
 - Cached reads are allowed only for already committed, version-specific object versions while tenant, dataset, object visibility, placement, node status, routing, read-token, and revocation records are all fresh enough.
 - Revocation is asymmetric: cached deny can block immediately, but cached absence cannot prove allow after the record's max age.
-- Audit and outbox remain PostgreSQL authority. Heads may buffer denied/status events locally, but cannot allow privileged actions that depend on buffered audit.
+- Audit and outbox remain metadata authority. Heads may buffer denied/status events locally, but cannot allow privileged actions that depend on buffered audit.
 
 Risk review:
-- Latest reads during PostgreSQL outage remain dangerous because the cached head pointer may miss deletes, newer committed versions, or policy changes.
+- Latest reads during metadata outage remain dangerous because the cached head pointer may miss deletes, newer committed versions, or policy changes.
 - Short cache TTLs reduce outage read availability, but v1 chooses correctness and revocation safety over stale-read convenience.
-- Recovery needs hard gates: migrations current, invariant checks passed, outbox lag bounded, audit append working, and caches rebuilt from PostgreSQL.
+- Recovery needs hard gates: migrations current, invariant checks passed, outbox lag bounded, audit append working, and caches rebuilt from the metadata store.
 
 Next decision:
 - Define the Rust crate layout and first scaffold package before implementation begins: workspace members, ownership boundaries, feature flags, shared error/ID types, migration embedding, deterministic CBOR vector location, storage-agent manifest crash-test boundary, and local-cluster harness ownership.

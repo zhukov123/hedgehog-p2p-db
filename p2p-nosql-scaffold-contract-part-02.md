@@ -15,7 +15,7 @@ These fixtures are beta blockers for service glue:
 - late ACK after delete epoch bump
 - revoked-node final result
 - interrupted repair conversion
-- PostgreSQL pause and recover
+- metadata pause and recover
 - restore with outbox lag
 - temp disk full during upload
 - repair reserve exhausted
@@ -60,8 +60,8 @@ Implementation should parse TOML, SQL migrations, and Rust code with real parser
 | `labels.canonical` | Rust enums, SQL accepted values, metric labels, admin filters, dashboard variables, or fixture names use implementation-state labels outside the canonical lowercase set | Seed a canonical-label table in `xtask`, then replace it with `hedgehog-types` generated metadata |
 | `labels.uppercase_quarantine` | Uppercase pre-contract states from `p2p-nosql-replication-repair-state-machine.md` appear in code, migrations, metrics, admin filters, dashboards, or fixtures | Maintain a denylist from the old state-machine document and report the exact file and token |
 | `deps.direction` | A crate imports a forbidden owner or service crate bypasses the owner crate named in the ownership map | Parse crate manifests and direct dependencies; later add `cargo metadata` package graph checks |
-| `metadata.workflows` | Metadata mutation APIs are exposed without one of the named workflow identifiers | Require public metadata-pg mutation modules or functions to carry a workflow name from the matrix |
-| `metadata.sql_scope` | Service crates contain raw SQL mutation strings or depend on `sqlx` without being `hedgehog-metadata-pg`, migrator, or test-only harness | Scan dependencies first, then scan source for `query!`, `query_as!`, `UPDATE`, `INSERT`, and `DELETE` markers outside allowed crates |
+| `metadata.workflows` | Metadata mutation APIs are exposed without one of the named workflow identifiers | Require public metadata-sql mutation modules or functions to carry a workflow name from the matrix |
+| `metadata.sql_scope` | Service crates contain raw SQL mutation strings or depend on `sqlx` without being `hedgehog-metadata-sql`, migrator, or test-only harness | Scan dependencies first, then scan source for `query!`, `query_as!`, `UPDATE`, `INSERT`, and `DELETE` markers outside allowed crates |
 | `fixtures.present` | Any first crash or chaos fixture is missing from `fixtures/` or the named crate test path | Require one manifest entry per fixture with owner crate, scenario name, and beta-blocker flag |
 | `cache.api` | Authority-sensitive code exposes raw cached authority records to mutation workflows | Require cache decision helpers to return `AuthorityCacheDecision<T>` and forbid raw cache modules in head mutation paths |
 | `pressure.policy` | Repair, cleanup, and write admission tests do not include every capacity pressure label | Require test or fixture names for `normal`, `pressure`, `critical`, and `emergency` in the pressure-ordering owner |
@@ -74,7 +74,7 @@ The validator should print grouped failures with stable check IDs, for example:
 
 ```text
 labels.uppercase_quarantine: crates/hedgehog-repair/src/state.rs used REPAIRING
-metadata.sql_scope: crates/hedgehog-head/src/write.rs contains UPDATE outside hedgehog-metadata-pg
+metadata.sql_scope: crates/hedgehog-head/src/write.rs contains UPDATE outside hedgehog-metadata-sql
 fixtures.present: missing beta fixture "late ACK after delete epoch bump"
 ```
 

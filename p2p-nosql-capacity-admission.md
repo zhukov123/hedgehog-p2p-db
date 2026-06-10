@@ -5,7 +5,7 @@
 This pass defines v1 capacity admission for the head-mediated encrypted object store.
 
 Assumptions:
-- PostgreSQL owns logical capacity accounting and reservations.
+- metadata store owns logical capacity accounting and reservations.
 - Storage agents report physical capacity and enforce local hard admission before accepting bytes.
 - Placement and repair must satisfy both metadata accounting and real disk headroom.
 - Capacity is multidimensional, not a single global free-byte number.
@@ -184,7 +184,7 @@ reservation_id is valid and unexpired
 fencing_token matches current lease
 ```
 
-Agent must reject if disk free percentage is below the local hard floor, even if PostgreSQL metadata is stale.
+Agent must reject if disk free percentage is below the local hard floor, even if metadata store metadata is stale.
 
 ## Pressure States
 
@@ -215,7 +215,7 @@ priority =
   - capacity_pressure_penalty_on_target_nodes
 ```
 
-## PostgreSQL Capacity Tables
+## SQL Capacity Tables
 
 Core tables:
 - `capacity_nodes`
@@ -256,7 +256,7 @@ Required constraints/checks:
 - committed replica consumes an existing valid reservation or is attached to a repair job
 - tenant/dataset quota checks happen in the same transaction that creates write intent and reservations
 
-Use transactional `SELECT ... FOR UPDATE` on tenant, dataset, and node capacity rows during admission.
+Use transactional guarded updates on tenant, dataset, and node capacity rows during admission. SQLite should serialize the v1-alpha writer path; later backends may use row locks behind the same workflow API.
 
 Tenant invariant:
 
@@ -275,7 +275,7 @@ reserved_write_bytes
 <= physical_usable_bytes
 ```
 
-Because physical free bytes are agent-reported and can change outside PostgreSQL, enforce the node check against the latest report plus a staleness bound:
+Because physical free bytes are agent-reported and can change outside metadata store, enforce the node check against the latest report plus a staleness bound:
 
 ```text
 last_reported_at >= now() - report_staleness_limit
@@ -297,14 +297,14 @@ Capacity is multidimensional:
 - deletion lag
 - emergency reserve
 
-V1 should implement pessimistic reservations in PostgreSQL, local hard admission on agents, and simple explicit pressure states. Dynamic capacity markets, clever fair-share models, and optimization-heavy placement should wait.
+V1 should implement pessimistic reservations in the metadata store, local hard admission on agents, and simple explicit pressure states. Dynamic capacity markets, clever fair-share models, and optimization-heavy placement should wait.
 
 ## Research Incorporated
 
 Severus reviewed the capacity admission model.
 
 Accepted findings:
-- PostgreSQL should own logical reservations.
+- metadata store should own logical reservations.
 - Storage agents are the physical disk admission gate.
 - Raw free bytes are not safe for admission.
 - Repair, temp files, tombstones/orphans, and emergency cleanup require separate reserves.

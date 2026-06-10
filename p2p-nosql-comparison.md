@@ -1,5 +1,11 @@
 # Comparison: DynamoDB vs Cassandra vs CouchDB vs a New P2P NoSQL System
 
+## Status
+
+Historical context only.
+
+The accepted v1-alpha product is not a DynamoDB-like NoSQL system. It is a head-mediated, client-encrypted P2P object store with SQLite metadata authority. Database API ideas from this comparison are deferred and tracked in [p2p-object-store-deferred-design.md](p2p-object-store-deferred-design.md).
+
 ## Short Verdict
 
 If you want a service people can use immediately, DynamoDB is the benchmark for managed simplicity.

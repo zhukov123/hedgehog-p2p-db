@@ -3,12 +3,12 @@
 ## Slice
 
 This pass defines v1 observability, admin dashboard, alerts, audit queries, and runbooks against the canonical model:
-- PostgreSQL metadata is the source of truth.
+- metadata store is the source of truth.
 - storage-agent reports are evidence.
 - outbox and audit logs are the operational timeline.
 - dashboards are views, not authority.
 
-This slice is Milestone 6 in [p2p-nosql-implementation-roadmap.md](p2p-nosql-implementation-roadmap.md). It should not block metadata-core and PostgreSQL foundations, but it must be complete before beta.
+This slice is Milestone 6 in [p2p-nosql-implementation-roadmap.md](p2p-nosql-implementation-roadmap.md). It should not block metadata-core and metadata store foundations, but it must be complete before beta.
 
 ## Metrics Taxonomy
 
@@ -72,7 +72,7 @@ hedgehog_agent_heartbeat_age_seconds
 
 Show:
 - head health
-- PostgreSQL health
+- metadata health
 - outbox lag
 - repair backlog
 - capacity pressure
@@ -87,7 +87,7 @@ Actions:
 ### Objects and Versions
 
 Show:
-- tenant, dataset, object key, version id, and state search
+- tenant, dataset, object id, lookup hash prefix, version id, and state search
 - current version
 - tombstones
 - replica count
@@ -170,7 +170,7 @@ Actions:
 Minimum dashboards:
 
 - **Cluster SLO**
-  - API latency, write success rate, read success rate, PostgreSQL latency, outbox lag, repair backlog age.
+  - API latency, write success rate, read success rate, metadata latency, outbox lag, repair backlog age.
 - **Replication Health**
   - Under-replicated versions, replica state counts, repair throughput, failed repair reasons.
 - **Capacity**
@@ -179,8 +179,8 @@ Minimum dashboards:
   - Heartbeat age, disk free, temp/orphan bytes, local rejects, upload failures.
 - **Security**
   - Auth failures, signature failures, revoked-principal attempts, invitation events, revocation lag.
-- **PostgreSQL**
-  - Connection pool, locks, deadlocks, transaction latency, WAL/PITR status, replication lag, bloat.
+- **metadata store**
+  - Connection pool, locks, deadlocks, transaction latency, backup/restore status, replication lag, bloat.
 - **Outbox**
   - Oldest pending event, attempts, dead-letter count, delivery latency.
 
@@ -188,8 +188,8 @@ Minimum dashboards:
 
 Critical:
 - any current committed object version has healthy replicas below required minimum for more than 5 minutes
-- PostgreSQL primary unavailable for more than 60 seconds
-- PITR/WAL archiving failing for more than 5 minutes
+- metadata store unavailable for more than 60 seconds
+- backup/restore archiving failing for more than 5 minutes
 - revoked node/head/admin accepted after revocation grace window
 - oldest pending outbox event for security/capacity/repair exceeds 10 minutes
 - effective free capacity below emergency reserve
@@ -202,7 +202,7 @@ Warning:
 - tenant/dataset capacity above 85%
 - global effective free below repair + temp + tombstone reserves
 - signature/auth failure spike above baseline
-- PostgreSQL transaction p95 above target for 15 minutes
+- metadata transaction p95 above target for 15 minutes
 
 Use burn-rate SLO alerts later. V1 starts with hard state and age thresholds.
 
@@ -247,7 +247,7 @@ Steps:
 - identify dominant reason: node loss, capacity, verification failures, or outbox lag
 - boost versions below replication minimum
 - add/drain nodes only after capacity dashboard confirms reserve headroom
-- verify completion from PostgreSQL state, not worker logs
+- verify completion from metadata state, not worker logs
 
 ### Capacity Pressure
 
@@ -261,7 +261,7 @@ Steps:
 ### Node Revocation
 
 Steps:
-- mark node revoked in PostgreSQL
+- mark node revoked in metadata store
 - stop assigning new leases
 - invalidate active leases through fencing tokens
 - enqueue repair for all healthy replicas on that node
@@ -275,17 +275,17 @@ Steps:
 - rotate admin/session tokens
 - force all heads to reload authority set
 - query audit by compromised head id and time window
-- revalidate accepted writes/deletes against PostgreSQL invariants
-- treat logs from compromised head as untrusted; PostgreSQL audit/outbox are primary
+- revalidate accepted writes/deletes against metadata invariants
+- treat logs from compromised head as untrusted; metadata store audit/outbox are primary
 
 ### Failed Restore
 
 Steps:
 - declare restore environment read-only
-- verify WAL continuity, latest recoverable timestamp, and schema migration version
+- verify backup continuity, latest recoverable timestamp, and schema migration version
 - run metadata invariant checker for object current version, replica counts, tombstone/delete epochs, and expired leases
 - compare sampled object manifests against storage-agent inventory
-- do not promote until PITR and invariant checks pass
+- do not promote until restore and invariant checks pass
 
 ### Stale Outbox Events
 
@@ -299,7 +299,7 @@ Steps:
 ## Before Beta
 
 Must build:
-- PostgreSQL-backed metrics exporters for canonical state
+- SQLite-backed metrics exporters for canonical state
 - storage-agent local metrics
 - audit table and query API
 - cluster, repair, capacity, security, and outbox dashboards
@@ -321,7 +321,7 @@ Can wait until v2:
 
 Prometheus, Grafana, and logs are views, not operational authority.
 
-PostgreSQL state, audit rows, and idempotent outbox records are the authority. If the admin console can take actions that bypass the same `metadata-core` transactions as normal protocol traffic, the architecture becomes unsafe.
+metadata state, audit rows, and idempotent outbox records are the authority. If the admin console can take actions that bypass the same `metadata-core` transactions as normal protocol traffic, the architecture becomes unsafe.
 
 ## Research Incorporated
 
@@ -330,8 +330,8 @@ Severus reviewed the observability and admin-operations model.
 Accepted findings:
 - metrics must align to object/version/replica/lease/repair/capacity/security states
 - admin actions must go through metadata-core transactions
-- dashboards should expose PostgreSQL state, not infer core truth from logs
-- critical alerts must include replica deficit, PostgreSQL availability, WAL/PITR failure, stale outbox, revocation failure, and emergency capacity
+- dashboards should expose metadata state, not infer core truth from logs
+- critical alerts must include replica deficit, metadata store availability, backup/restore failure, stale outbox, revocation failure, and emergency capacity
 - beta requires runbooks and invariant checks, not just charts
 
 ## Next Unresolved Portion

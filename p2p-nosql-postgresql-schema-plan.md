@@ -1,11 +1,11 @@
-# P2P NoSQL PostgreSQL Schema Plan
+# P2P Object Store SQLite-First SQL Schema Plan
 
 ## Slice
 
-This pass turns the metadata and replication/repair state-machine design into a concrete PostgreSQL v1 schema plan.
+This pass turns the metadata and replication/repair state-machine design into a concrete SQLite-first SQL schema plan.
 
 Principles:
-- PostgreSQL enforces identity, uniqueness, monotonic epochs, and no-duplicate-active-work invariants.
+- the metadata store enforces identity, uniqueness, monotonic epochs, and no-duplicate-active-work invariants.
 - Rust `metadata-core` enforces workflow semantics, state transitions, placement policy, and repair priority.
 - Storage agents never decide object liveness.
 - Triggers should be avoided for the main state machine; use explicit Rust transactions and tests.
@@ -15,14 +15,15 @@ Principles:
 ### `objects`
 
 Purpose:
-- one row per tenant-visible object key
+- one row per tenant-visible opaque object
 - owns the current head pointer, placement epoch, and delete epoch
 
 Key columns:
 - `object_id uuid primary key`
 - `tenant_id uuid not null`
-- `bucket text not null`
-- `key text not null`
+- `dataset_id uuid not null`
+- `object_lookup_hash bytea not null`
+- `encrypted_name_metadata blob null`
 - `current_version_id uuid null`
 - `state text not null`: `active | delete_marker | deleted`
 - `placement_epoch bigint not null default 1`
@@ -31,7 +32,7 @@ Key columns:
 - `updated_at timestamptz not null`
 
 Required indexes:
-- unique `(tenant_id, bucket, key)`
+- unique `(tenant_id, dataset_id, object_lookup_hash)`
 
 ### `object_versions`
 
@@ -44,7 +45,7 @@ Key columns:
 - `version_id uuid primary key`
 - `object_id uuid not null references objects(object_id)`
 - `version_no bigint not null`
-- `state text not null`: `write_intent | committing | committed | delete_marker | aborted | gc_eligible | purged`
+- `state text not null`: `writing | committed | under_replicated | quarantined | delete_marker | gc_eligible | garbage_collected`
 - `content_hash bytea null`
 - `size_bytes bigint null`
 - `encryption_alg text not null`
@@ -59,7 +60,7 @@ Key columns:
 
 Required indexes:
 - unique `(object_id, version_no)`
-- partial unique `(object_id) where state = 'write_intent'`
+- partial unique `(object_id) where state = 'writing'`
 
 ### `replicas`
 
@@ -70,7 +71,7 @@ Key columns:
 - `replica_id uuid primary key`
 - `version_id uuid not null references object_versions(version_id)`
 - `node_id uuid not null`
-- `state text not null`: `planned | transferring | present | suspect | missing | deleting | deleted | failed`
+- `state text not null`: `planned | streaming | verifying | healthy | suspect | corrupt | stale | delete_pending | deleted`
 - `placement_epoch bigint not null`
 - `delete_epoch bigint not null default 0`
 - `fencing_token bigint not null`
@@ -82,8 +83,8 @@ Key columns:
 
 Required indexes:
 - unique `(version_id, node_id)`
-- partial index `(version_id) where state = 'present'`
-- partial index `(node_id) where state in ('planned', 'transferring', 'present', 'suspect')`
+- partial index `(version_id) where state = 'healthy'`
+- partial index `(node_id) where state in ('planned', 'streaming', 'verifying', 'healthy', 'suspect')`
 
 ### `leases`
 
@@ -115,7 +116,7 @@ Key columns:
 - `replica_id uuid null references replicas(replica_id)`
 - `kind text not null`: `under_replicated | suspect_verify | missing_replace | delete_cleanup | gc`
 - `priority int not null`
-- `state text not null`: `queued | leased | running | succeeded | failed | dead`
+- `state text not null`: `pending | leased | running | verifying | completed | retry_wait | failed_final | canceled_superseded`
 - `attempt_count int not null default 0`
 - `lease_id uuid null references leases(lease_id)`
 - `not_before timestamptz not null default now()`
@@ -126,7 +127,7 @@ Key columns:
 
 Required indexes:
 - unique `(idempotency_key)`
-- partial unique `(version_id, kind) where state in ('queued', 'leased', 'running')`
+- partial unique `(version_id, kind) where state in ('pending', 'leased', 'running', 'verifying', 'retry_wait')`
 - index `(state, priority desc, not_before, created_at)`
 
 ### `tombstones`
@@ -192,8 +193,8 @@ Required indexes:
 
 Steps:
 1. Insert or check `idempotency_records`.
-2. Lock the `objects` row by `(tenant_id, bucket, key)` or create it.
-3. Insert `object_versions` as `write_intent` with next `version_no` and current `placement_epoch`.
+2. Lock or create the `objects` row by `object_id`, or by `(tenant_id, dataset_id, object_lookup_hash)` for human-name lookup.
+3. Insert `object_versions` as `writing` with next `version_no` and current `placement_epoch`.
 4. Insert planned `replicas`.
 5. Insert `outbox_events` for placement/upload work.
 6. Commit.
@@ -208,9 +209,9 @@ Steps:
 1. Validate idempotency or command identity.
 2. Lock `replicas(version_id, node_id)`.
 3. Require matching `fencing_token`, `placement_epoch`, and non-stale `delete_epoch`.
-4. Transition `planned/transferring -> present`.
+4. Transition `planned/streaming/verifying -> healthy`.
 5. Record byte count and hash verification.
-6. Count present replicas inside the same transaction.
+6. Count healthy replicas inside the same transaction.
 7. If required count is met, transition version to `committed` and update `objects.current_version_id`.
 8. Insert outbox event.
 
@@ -225,15 +226,15 @@ Steps:
 3. Insert an `object_versions` row with `state = 'delete_marker'`.
 4. Update object to `delete_marker` or `deleted`.
 5. Insert `tombstones`.
-6. Mark old live replicas `deleting` where `delete_epoch < new_delete_epoch`.
+6. Mark old live replicas `delete_pending` where `delete_epoch < new_delete_epoch`.
 7. Queue delete cleanup jobs and outbox events.
 
 ### Repair Leasing
 
 Steps:
-1. Select queued job using `FOR UPDATE SKIP LOCKED`.
+1. Select pending job using guarded claim updates.
 2. Insert or update `leases` with incremented fencing token.
-3. Move job `queued -> leased/running`.
+3. Move job `pending -> leased/running`.
 4. Worker includes fencing token on every completion mutation.
 5. Completion succeeds only if lease token still matches and lease is unexpired.
 
@@ -241,7 +242,7 @@ Steps:
 
 Steps:
 1. Find tombstones with `retain_until < now()`.
-2. Confirm no live replicas for old versions except `deleted/failed`.
+2. Confirm no live replicas for old versions except `deleted/corrupt`.
 3. Confirm no active repair jobs for affected versions.
 4. Confirm version is not `objects.current_version_id`.
 5. Mark versions `gc_eligible`.
@@ -282,33 +283,33 @@ Rules:
 - rollback means restore database plus redeploy previous app, not hand-written down migrations for stateful metadata
 - binaries refuse to run against unsupported future schema versions
 
-## Backup, PITR, and Failover Requirements
+## Backup, Restore, and Recovery Requirements
 
 Before beta:
-- WAL archiving and PITR tested to a named timestamp
-- daily full backup plus continuous WAL
+- local SQLite backup/export and restore tested against a named fixture point
+- daily full backup/export during beta
 - weekly restore drill into a clean environment during beta
-- failover drill proving app reconnect, lease expiry behavior, and no duplicate repair corruption
+- restart/restore drill proving app reconnect, lease expiry behavior, and no duplicate repair corruption
 - backup integrity check through invariant queries
 - declared RPO/RTO, with target RPO under 5 minutes
 - outbox replay test after restore/failover
 
 Post-restore invariant checks:
 - no object has `current_version_id` pointing to a non-committed and non-delete-marker version
-- no committed version has fewer than required present replicas unless an active repair exists
+- no committed version has fewer than required healthy replicas unless an active repair exists
 - no two active repair jobs for the same `(version_id, kind)`
 - no stale fencing token can complete a replica or repair
 - tombstones are retained long enough to dominate delayed replica completions
 
 ## Research Incorporated
 
-Severus reviewed the PostgreSQL v1 schema plan.
+This document was originally reviewed as a PostgreSQL schema plan. It is now the SQLite-first SQL schema plan; PostgreSQL-specific production behavior is deferred.
 
 Accepted findings:
-- PostgreSQL should reject identity, race, and duplicate-active-work errors.
+- the metadata store should reject identity, race, and duplicate-active-work errors.
 - Rust should own state-machine semantics.
 - The core tables are `objects`, `object_versions`, `replicas`, `leases`, `repair_jobs`, `tombstones`, `idempotency_records`, and `outbox_events`.
-- `FOR UPDATE SKIP LOCKED` is appropriate for repair leasing.
+- SQLite repair leasing should use guarded claim updates; PostgreSQL may later use skip-locked leasing behind the same workflow API.
 - Recovery drills must prove outbox replay and fencing behavior, not merely database restore.
 
 ## Next Unresolved Portion

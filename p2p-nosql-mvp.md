@@ -1,5 +1,11 @@
 # Peer-to-Peer NoSQL MVP
 
+## Status
+
+Historical context only.
+
+The accepted v1-alpha product is a head-mediated, client-encrypted P2P object store with SQLite metadata authority. Local-first database behavior, JSON document storage, CRDT fields, and secondary indexes are deferred and tracked in [p2p-object-store-deferred-design.md](p2p-object-store-deferred-design.md).
+
 ## MVP Goal
 
 Ship a small but real peer-to-peer database that can be used in classrooms, clubs, labs, and community projects without pretending to be DynamoDB on day one.

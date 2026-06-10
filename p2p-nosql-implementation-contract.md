@@ -1,38 +1,38 @@
-# P2P NoSQL V1 Implementation Contract
+# P2P Object Store V1 Implementation Contract
 
 ## Slice
 
 This pass freezes the first implementation contract for the Rust-first build.
 
-The goal is to prevent the first crates from quietly becoming separate authorities. `hedgehog-types`, `hedgehog-crypto`, `hedgehog-metadata-core`, `hedgehog-metadata-pg`, storage agents, heads, admin tooling, and the local cluster must share the same database, state names, signature bytes, reservation lifecycle, object size classes, and test posture from the first scaffold.
+The goal is to prevent the first crates from quietly becoming separate authorities. `hedgehog-types`, `hedgehog-crypto`, `hedgehog-metadata-core`, `hedgehog-metadata-sql`, storage agents, heads, admin tooling, and the local cluster must share the same database, state names, signature bytes, reservation lifecycle, object size classes, and test posture from the first scaffold.
 
 ## Contract Decisions
 
-### PostgreSQL Client
+### SQLite-First SQL Client
 
-Use `sqlx` for v1.
+Use `sqlx` with SQLite for v1-alpha.
 
 Reasons:
 - compile-time checked SQL fits the explicit migration and transaction-heavy roadmap
 - the built-in migration runner keeps CI, the migrator service, and local cluster aligned
 - query macros make state-name drift visible early when SQL enum/text values change
-- the project does not yet need lower-level protocol control from `tokio-postgres`
+- SQLite keeps the first implementation local, inspectable, and easy to test
 
 Rules:
-- do not mix `sqlx` and `tokio-postgres` in v1 service crates
+- do not introduce PostgreSQL-specific client crates in v1-alpha service crates
 - use explicit transactions for all metadata mutations
 - keep query text near the workflow that owns the transaction
 - avoid SQL triggers for the main state machine
 - use Rust state-transition functions before issuing update statements
 
-`tokio-postgres` remains acceptable only for a later deliberately isolated subsystem with a documented reason.
+PostgreSQL is deferred to the production backend track. When it is added, it should be implemented behind the same named metadata workflows rather than changing service-crate authority boundaries.
 
 ### Migration Layout
 
-Use a single migrations directory owned by `hedgehog-metadata-pg`:
+Use a single migrations directory owned by `hedgehog-metadata-sql`:
 
 ```text
-crates/hedgehog-metadata-pg/migrations/
+crates/hedgehog-metadata-sql/migrations/sqlite/
   0001_security_roots_tenants_datasets.sql
   0002_nodes_keys_capacity.sql
   0003_objects_versions_replicas.sql
@@ -45,36 +45,36 @@ The migrator service, CI tests, CLI local-cluster boot, and integration tests al
 
 Migration policy:
 - forward-only during beta
-- transactional migrations where PostgreSQL allows it
+- transactional migrations where SQLite allows it
 - rollback means restore plus previous binary, not hand-written down migrations
 - every migration adds or updates invariant checks in the test harness
 - migrations that add states or labels must update the state glossary in `hedgehog-types`
 
 First test database workflow:
-1. Start disposable PostgreSQL from generated Compose or `testcontainers`.
+1. Create a disposable SQLite database in the generated runtime directory or test temp directory.
 2. Run migrations through the same migrator code path.
 3. Seed tenant, dataset, admin identity, security root, three nodes, and capacity reports.
 4. Run metadata invariant checks.
 5. Execute idempotent write-intent, reservation, replica completion, commit, delete marker, repair lease, and outbox replay fixtures.
-6. Drop the database.
+6. Close and remove the database.
 
-CI can later add a matrix for PostgreSQL versions, but the first target should be one pinned supported version.
+CI can later add a PostgreSQL backend matrix, but the first target is one pinned SQLite library/version behavior through the Rust crate.
 
 ### Metadata Transaction Boundary
 
-`hedgehog-metadata-core` is the semantic authority. `hedgehog-metadata-pg` is the durable authority.
+`hedgehog-metadata-core` is the semantic authority. `hedgehog-metadata-sql` is the durable authority.
 
 Boundary:
 - `metadata-core` defines commands, preconditions, state transitions, invariant checks, and semantic errors
-- `metadata-pg` loads rows, locks the needed records, calls `metadata-core`, writes rows, writes idempotency records, writes outbox events, writes audit events, and commits
-- service crates call workflow functions in `metadata-pg`, not raw SQL
+- `metadata-sql` loads rows, starts the needed transaction, calls `metadata-core`, writes rows, writes idempotency records, writes outbox events, writes audit events, and commits
+- service crates call workflow functions in `metadata-sql`, not raw SQL
 
 Recommended shape:
 
 ```text
 metadata_core::command::{CreateWriteIntent, CompleteReplica, CommitVersion, DeleteObject, LeaseRepair}
 metadata_core::decision::{Decision, RowPatch, OutboxIntent, AuditIntent}
-metadata_pg::workflow::{create_write_intent, complete_replica, commit_version, delete_object, lease_repair}
+metadata_sql::workflow::{create_write_intent, complete_replica, commit_version, delete_object, lease_repair}
 ```
 
 Do not expose a generic "update replica state" database API to heads, repair workers, admin UI, or storage agents. Every mutation should be a named workflow with idempotency and audit behavior.
@@ -182,9 +182,9 @@ Write reservation is the first capacity invariant to implement.
 
 Lifecycle:
 1. `pending`: metadata request accepted for evaluation, no durable capacity claim yet.
-2. `reserved`: PostgreSQL has reserved logical bytes on selected nodes with placement epoch, delete epoch, and fencing token.
+2. `reserved`: the metadata store has reserved logical bytes on selected nodes with placement epoch, delete epoch, and fencing token.
 3. `streaming`: at least one selected storage agent accepted the command and passed local physical admission.
-4. `finalizing`: enough final results arrived to evaluate commit, abort, or cleanup conversion in PostgreSQL.
+4. `finalizing`: enough final results arrived to evaluate commit, abort, or cleanup conversion in the metadata store.
 5. `committed`: object version reached required healthy replica count and the reservation converted into committed logical bytes.
 6. `expired`: lease exceeded max age before commit; no late completion can make the version visible.
 7. `aborted`: no committed version is possible and metadata has classified durable side effects as cleanup, orphan, or repair-owned work.
@@ -192,7 +192,7 @@ Lifecycle:
 
 Rules:
 - new writes require both metadata reservation and agent local admission
-- reservations are idempotent by tenant, dataset, object key, version intent, and idempotency key
+- reservations are idempotent by tenant, dataset, object id or lookup hash, version intent, and idempotency key
 - final replica completion must match reservation id, version id, node id, fencing token, placement epoch, and delete epoch
 - expired reservations do not accept late completions
 - leaked reservations alert before they consume the repair reserve
@@ -339,7 +339,7 @@ These are starting constants for tests and local cluster, not production tuning 
 
 Pull `hedgehog-local-cluster` forward into Milestone 1 as a thin harness.
 
-The first harness exists when `metadata-pg` can:
+The first harness exists when `metadata-sql` can:
 - run migrations
 - create tenant
 - create dataset
@@ -358,7 +358,7 @@ target/local-cluster/
   compose.yaml
   .env
   secrets/
-  postgres/
+  metadata/
   grafana/provisioning/
   prometheus/prometheus.yaml
 ```
@@ -379,8 +379,8 @@ crates/hedgehog-local-cluster/
 1. Create `hedgehog-types` with IDs, epochs, errors, state enums, and glossary tests.
 2. Create `hedgehog-crypto` with deterministic CBOR envelope fixtures.
 3. Create `hedgehog-metadata-core` with reservation and replica transition tests.
-4. Create `hedgehog-metadata-pg` with `sqlx`, migrations, fixtures, and invariant checks.
-5. Create thin `hedgehog-local-cluster` migrator/PostgreSQL harness.
+4. Create `hedgehog-metadata-sql` with `sqlx`, migrations, fixtures, and invariant checks.
+5. Create thin `hedgehog-local-cluster` migrator/SQLite harness.
 6. Add storage-agent manifest/journal crash tests before networked storage-agent service code.
 
 ## Beta Blockers Added By This Contract
@@ -399,9 +399,9 @@ The next design slice should define the Rust crate layout and first scaffold pac
 - concept ownership map for IDs, states, errors, envelopes, migrations, invariants, metrics, and admin labels
 - allowed and forbidden crate dependencies
 - feature-flag policy
-- PostgreSQL workflow rules for lock order, isolation, retry, idempotency, outbox, and audit writes
+- metadata workflow rules for transaction boundaries, guarded updates, retry, idempotency, outbox, and audit writes
 - canonical envelope-vector directory and generation command
 - storage-agent manifest and journal crash-test boundary
-- first local-cluster chaos fixtures for PostgreSQL pause/recover, temp disk full, stale capacity, repair reserve exhaustion, head crash during upload, and agent restart after ACK
+- first local-cluster chaos fixtures for metadata pause/recover, temp disk full, stale capacity, repair reserve exhaustion, head crash during upload, and agent restart after ACK
 
 This slice should be treated as a scaffold contract, not a prose roadmap. Service glue should wait until these ownership and fixture boundaries are clear.

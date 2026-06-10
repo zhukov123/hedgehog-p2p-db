@@ -1,273 +1,243 @@
-# Peer-to-Peer NoSQL Database Architecture Spec
+# Hedgehog P2P Object Store Architecture Spec
 
-## Goal
+## Canonical V1 Framing
 
-Build a full-featured peer-to-peer NoSQL database that feels familiar to DynamoDB users but runs without a central control plane.
+Hedgehog is a peer-to-peer object store, not a DynamoDB-compatible NoSQL database in v1.
 
-The design target is:
-- local-first writes
-- offline operation
-- automatic replication and convergence
-- community or university deployment
-- enough operational tooling to be teachable and supportable
+The v1 system is:
+- a head-mediated storage network
+- a client-encrypted whole-object store
+- a pool of participant storage agents
+- a transactional metadata authority
+- an operator-visible repair, capacity, audit, and observability surface
 
-## What This Is
+The first implementation uses SQLite as the metadata authority to keep the system easy to build, test, and run locally. The metadata layer should remain SQL-oriented so PostgreSQL can become a later production backend without changing object, replica, repair, lease, or audit semantics.
 
-This is not a general SQL database.
-It is a distributed document / key-value / wide-column system with:
-- primary-key access as the core path
-- optional secondary indexes
-- multi-peer replication
-- conflict handling that is explicit and deterministic
-- strong security and observability
+## What V1 Is
+
+V1 stores opaque encrypted objects.
+
+Core properties:
+- clients encrypt object payloads before upload
+- heads route requests and coordinate transfers
+- storage agents store ciphertext and local evidence
+- metadata decides placement, visibility, leases, capacity, repair, revocation, and audit
+- writes become visible only after the required replicas are durable
+- repair is head-mediated in v1
+- direct agent-to-agent repair is deferred
+
+## What V1 Is Not
+
+V1 is not:
+- a local-first database
+- a general document database
+- a DynamoDB-compatible API
+- a JSON query engine
+- a secondary-index service over plaintext attributes
+- a system with offline writes that later reconcile without metadata authority
+- a central-storage service where heads hold all data
+
+Older database-oriented docs in this repository are historical context unless a newer implementation contract explicitly adopts them.
 
 ## Design Principles
 
-1. Prefer availability and locality over global coordination.
-2. Keep the primary API narrow and predictable.
-3. Make replication incremental, resumable, and inspectable.
-4. Support offline use as a first-class mode.
-5. Treat security, governance, and observability as core features.
-6. Make the system understandable enough for students and operators.
-7. Ship with built-in dashboards and operational visibility from day one.
+1. Keep the authority model simple enough to implement correctly.
+2. Store only ciphertext on infrastructure and participant machines.
+3. Make metadata transitions transactional, named, and testable.
+4. Make replication, repair, capacity, and deletes inspectable.
+5. Fail closed when authority is unavailable or stale.
+6. Prefer whole-object transfer before chunking, erasure coding, or direct peer repair.
+7. Keep v1 deployable on one machine with SQLite and multiple local storage agents.
+8. Preserve a migration path to stronger production metadata backends.
 
 ## Core Architecture
 
-### 1. Network Layer
+### 1. Clients
 
-Use a P2P stack such as libp2p for:
-- encrypted peer connections
-- peer discovery
-- NAT traversal
-- relay support
-- protocol multiplexing
+Clients:
+- own user keys
+- encrypt object payloads before upload
+- compute payload hashes
+- send signed requests to a head node
+- decrypt fetched payloads locally
 
-This layer should support browsers, mobile devices, desktops, and servers.
+Servers must never require plaintext payload access.
 
-### 2. Identity and Membership
+### 2. Head Nodes
 
-Each node needs:
-- a persistent cryptographic identity
-- a peer record with addresses and metadata
-- a membership protocol
-- peer authorization and revocation
+Head nodes are public coordinators.
 
-For community use, support:
-- invitation-based clusters
-- federated cluster peering
-- optional trust domains
+They:
+- authenticate signed envelopes
+- rate-limit and validate requests
+- call metadata workflows for authority decisions
+- coordinate uploads, reads, deletes, and repair copies
+- maintain outbound storage-agent sessions
+- expose client and admin APIs
+- publish already-committed outbox work where configured
 
-### 3. Storage Engine
+They must not independently decide:
+- object visibility
+- replica placement
+- tenant authorization
+- node revocation
+- write admission
+- repair ownership
+- durable audit results
 
-Use an embedded local engine with:
-- append-only operation log
-- durable snapshots
-- compaction
-- tombstone handling
-- background repair metadata
+### 3. Metadata Authority
 
-The local store must work fully disconnected.
+The metadata authority owns:
+- tenants and datasets
+- opaque object IDs, lookup hashes, and version records
+- replica placement and health
+- write reservations and capacity accounting
+- leases and fencing tokens
+- repair jobs
+- storage-agent identity and revocation
+- invitations and admin roles
+- outbox and audit rows
 
-### 4. Data Model
+V1-alpha backend:
+- SQLite
+- single metadata writer authority
+- explicit migrations
+- deterministic integration tests
+- local backup/export/restore drills
 
-Start with:
-- primary key
-- optional sort key
-- JSON-like attributes
-- sparse secondary indexes
+Deferred production backend:
+- PostgreSQL
+- multi-head/multi-worker concurrency
+- PITR, WAL archiving, failover, and operational backup tooling
 
-This mirrors the parts of DynamoDB that are easy to teach and scale.
+### 4. Storage Agents
 
-### 5. Replication Engine
+Storage agents run on participant machines.
 
-Replication should be:
-- incremental
-- peer-to-peer
-- resumable after interruption
-- able to sync from multiple sources
+They:
+- keep outbound sessions to heads
+- reserve a configured disk budget
+- store object ciphertext
+- keep local manifests and command journals
+- enforce local hard capacity rejection
+- reject stale fencing tokens after restart
+- report capacity, health, final command results, and anomalies
 
-Use a two-path approach:
-- operation sync for recent changes
-- state reconciliation for repair and catch-up
+Agents do not decide object liveness or placement.
 
-### 6. Conflict Model
+### 5. Data Model
 
-Use conflict-free types where possible:
-- counters
-- sets
-- maps
-- registers
-- append-only feeds
+V1 data model:
+- tenant
+- dataset
+- opaque `object_id`
+- `object_lookup_hash` for deterministic human-name lookup without plaintext names
+- immutable object version
+- ciphertext length and content hash
+- encryption metadata reference
+- replica rows
+- tombstone/delete marker rows
 
-For non-CRDT data:
-- attach causal metadata
-- expose deterministic conflict resolution
-- allow application-level merge hooks
+Queryable metadata is operational metadata, not plaintext object attributes. V1 does not require plaintext object names, paths, or filenames in metadata. Human-readable names belong in encrypted client metadata.
 
-### 7. Query and Indexing
+The lookup hash is computed by the client:
 
-Support these query tiers:
-- point lookups by primary key
-- range scans by sort key
-- equality lookups by secondary index
-- limited prefix / partial materialized views
+```text
+object_lookup_hash = HMAC-SHA256(dataset_lookup_secret, normalized_object_name)
+```
 
-Indexes should be:
-- explicit
-- asynchronously maintained
-- rebuildable
+The dataset lookup secret is available only to authorized clients. The metadata store can use `object_lookup_hash` for deterministic lookup, but cannot cheaply guess names such as `photo.jpg`, `taxes.pdf`, or `resume.docx` without the secret.
 
-### 8. Transactions and Integrity
+Application-level JSON documents, CRDT fields, secondary indexes, and query views are deferred until the object-store foundation is correct.
 
-Do not promise arbitrary cross-key serializability everywhere.
-Instead provide:
-- conditional writes
-- compare-and-swap
-- atomic batch within a partition when possible
-- optional consensus-backed transactions for small critical scopes
+### 6. Write Path
 
-### 9. Repair and Reconciliation
+1. Client encrypts an object and computes the content hash.
+2. Client sends a signed write-intent request to a head.
+3. Head asks metadata to create a write reservation and planned replicas.
+4. Metadata checks tenant/dataset quota, node eligibility, placement, capacity, delete epoch, and revocation state.
+5. Head streams ciphertext to selected storage agents.
+6. Agents write temp files, verify bytes and hash, fsync, update manifest/journal, and return final ACKs.
+7. Head submits final ACKs to metadata.
+8. Metadata accepts only ACKs with matching reservation, version, node, fencing token, placement epoch, and delete epoch.
+9. Metadata commits the version once the required healthy replica count is met.
 
-Use anti-entropy repair:
-- Merkle-tree or hash-range based comparison
-- incremental repair windows
-- background repair scheduling
+### 7. Read Path
 
-Support:
-- hinted delivery for temporarily unreachable peers
-- read repair for stale replicas
+Reads are metadata-authorized.
 
-### 10. Backup and Recovery
+V1 supports:
+- read latest committed version by opaque object id or lookup hash
+- read specific committed version
+- fetch from any eligible healthy replica
+- fail closed if metadata, revocation, placement, or read token authority is stale
 
-Provide:
-- point-in-time recovery
-- on-demand snapshots
-- export/import
-- cross-peer restore
-- audit trail of restores
+### 8. Delete and GC
+
+Deletes create metadata tombstones/delete markers before physical cleanup starts.
+
+Rules:
+- stale writes and stale repair completions must not resurrect deleted data
+- storage cleanup is retryable and idempotent
+- metadata tombstones outlive retry, repair, audit, and clock-skew windows
+- GC must keep enough state to reject late completions
+
+### 9. Repair
+
+V1 repair is head-mediated:
+
+```text
+source agent -> head -> target agent
+```
+
+The head coordinates ciphertext movement but does not decrypt payloads.
+
+Direct agent-to-agent repair is deferred because it requires direct peer discovery, NAT traversal, peer-to-peer authorization, revocation enforcement, abuse controls, transfer observability, and more complex failure recovery.
+
+### 10. Capacity Admission
+
+Capacity admission is pessimistic.
+
+Metadata tracks logical reservations and committed bytes. Storage agents separately enforce local physical admission.
+
+A write requires:
+- tenant quota available
+- dataset quota available if configured
+- enough eligible nodes
+- placement diversity satisfied
+- per-node effective free capacity
+- repair reserve preserved
+- fresh enough capacity reports
+- local agent admission before bytes are accepted
 
 ### 11. Security
 
 Required:
-- end-to-end encrypted connections
-- authenticated peers
-- signed operations
-- authorization policies
-- encrypted-at-rest local storage
-- secure key rotation
-
-Optional but important for community deployments:
-- quorum-based trust domains
-- admin role separation
-- abuse reporting and quarantine
+- signed client, admin, and agent envelopes
+- authenticated storage-agent identities
+- invitation-based joining
+- explicit revocation epochs
+- signed admin actions
+- audit rows for authority-changing operations
+- client-side payload encryption
+- metadata privacy controls
 
 ### 12. Observability
 
-You will need:
-- metrics
-- tracing
-- logs
-- peer health inspection
-- replication lag metrics
-- repair status
-- index health
-- storage utilization
-- built-in dashboards
-- Grafana integration
-- node inventory and topology views
-- admin links that jump from the local UI into Grafana
+The operator surface must show:
+- metadata health
+- head health
+- storage-agent health
+- replica counts and repair deficit
+- write reservations and stuck workflows
+- capacity pressure
+- revocation lag
+- outbox lag
+- audit event continuity
+- local-agent anomalies
 
-Observability should be a first-class product surface, not an afterthought. The system should expose a local admin dashboard that can show:
-- nodes and peer status
-- live replication activity
-- storage and memory pressure
-- read and write rates
-- repair progress
-- conflict counts
-- index freshness
-- recent alerts and warnings
+Grafana dashboards and the admin API are views over authority state. They are not authority themselves.
 
-Grafana should be deployed alongside the database in containers so that:
-- the base install remains reproducible
-- dashboards are available in local dev and production-like environments
-- operators can use standard Grafana dashboards without custom setup
+## Deferred Design
 
-Prefer a container stack where the database node, admin dashboard, and Grafana can be brought up together with one compose-like command.
-
-### 13. Developer Experience
-
-Include:
-- SDKs
-- CLI tools
-- local dev mode
-- deterministic test harnesses
-- migration tooling
-- schema inspection
-- example applications
-
-## Recommended Semantics
-
-### Consistency
-
-Default to eventual consistency with strong local writes.
-
-Offer three modes:
-- eventual
-- causal
-- scoped strong consistency for specific operations
-
-### Availability
-
-Writes should succeed locally whenever the node is healthy.
-If a strict write cannot be committed safely, the system should fail clearly rather than silently degrade.
-
-### Read Behavior
-
-Reads should prefer local data when fresh enough, but be able to:
-- merge replicas
-- surface conflicts
-- request repair
-
-## Internal Subsystems
-
-- peer discovery
-- auth and identity
-- op log
-- snapshot manager
-- replication scheduler
-- conflict resolver
-- indexer
-- repair worker
-- backup manager
-- admin API
-- telemetry pipeline
-- dashboard service
-- Grafana container
-- metrics exporter
-- container orchestration layer
-
-## Suggested First Implementation
-
-Build a narrow vertical slice:
-- one database type
-- one peer protocol
-- one local engine
-- one replicated document type
-- one secondary index
-- one repair workflow
-- one metrics pipeline
-- one local admin dashboard
-- one Grafana deployment in containers
-
-Then expand horizontally.
-
-## References
-
-- [Amazon Dynamo paper](https://web.stanford.edu/class/cs244/papers/amazon-dynamo-sosp2007.pdf)
-- [DynamoDB core components](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/HowItWorks.CoreComponents.html)
-- [Apache Cassandra overview](https://cassandra.apache.org/doc/latest/cassandra/architecture/overview.html)
-- [CRDTs: Consistency without concurrency control](https://arxiv.org/abs/0907.0929)
-- [Byzantine Eventual Consistency and the Fundamental Limits of Peer-to-Peer Databases](https://arxiv.org/abs/2012.00472)
-- [libp2p docs](https://docs.libp2p.io/)
-- [IPFS how it works](https://docs.ipfs.tech/concepts/how-ipfs-works/)
-- [CouchDB documentation](https://docs.couchdb.org/_/downloads/en/stable/pdf/)
+Deferred v2/v3 choices live in [p2p-object-store-deferred-design.md](p2p-object-store-deferred-design.md).

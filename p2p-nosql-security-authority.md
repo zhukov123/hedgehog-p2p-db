@@ -5,7 +5,7 @@
 This pass defines the v1 security root and protocol authority model.
 
 Assumptions:
-- PostgreSQL is the source of truth for invitations, identities, revocation, epochs, permissions, and audit sequence.
+- metadata store is the source of truth for invitations, identities, revocation, epochs, permissions, and audit sequence.
 - Head nodes are public infrastructure and must not be trusted as independent authority.
 - Storage agents are untrusted blob holders and proof reporters.
 - Payload plaintext and raw client keys never leave the client.
@@ -15,9 +15,9 @@ Assumptions:
 Recommended v1 authority:
 
 - offline/root project key signs tenant/admin CA keys and cluster policy roots
-- PostgreSQL stores operational admin identities, roles, scopes, revocation state, and policy versions
+- the metadata store holds operational admin identities, roles, scopes, revocation state, and policy versions
 - privileged actions require signed admin envelopes and idempotency keys
-- head nodes authenticate and forward, but PostgreSQL makes final authority decisions
+- head nodes authenticate and forward, but metadata store makes final authority decisions
 
 Minimum roles:
 
@@ -38,7 +38,7 @@ All privileged changes should record:
 
 ## Invitations
 
-Invitation records live in PostgreSQL and are treated as bearer secrets plus signed policy.
+Invitation records live in metadata store and are treated as bearer secrets plus signed policy.
 
 Fields:
 - `invite_id`
@@ -59,7 +59,7 @@ Rules:
 - default one-time use
 - default short expiry, such as 24-72 hours
 - scoped to tenant, role, and optionally dataset
-- revocation is immediate in PostgreSQL
+- revocation is immediate in metadata store
 - raw invite tokens are never logged
 - accept flow is one transaction: verify secret hash, check expiry/revocation/use count, create identity, increment `uses_count`, and write audit event
 
@@ -99,8 +99,8 @@ Head nodes may:
 - reject malformed, expired, oversized, or unauthenticated requests
 - rate-limit
 - assign request IDs
-- forward metadata mutations to PostgreSQL transactions
-- issue short-lived leases only after PostgreSQL grants them
+- forward metadata mutations to metadata transactions
+- issue short-lived leases only after metadata store grants them
 - emit outbox events after committed metadata changes
 
 Head nodes must not independently decide:
@@ -114,7 +114,7 @@ Head nodes must not independently decide:
 - repair eligibility
 - lease fencing validity
 
-Those checks must be made transactionally against PostgreSQL.
+Those checks must be made transactionally against metadata store.
 
 ## Storage-Agent Key Rotation and Revocation
 
@@ -128,7 +128,7 @@ Model:
 Rotation:
 1. Agent generates a new keypair.
 2. Agent signs rotation request with current valid key.
-3. PostgreSQL records new key as pending/current.
+3. metadata store records new key as pending/current.
 4. Head nodes accept both old and new keys during overlap.
 5. Old key expires automatically after grace window.
 
@@ -138,7 +138,7 @@ Revocation:
 3. Revoke active keys and sessions.
 4. Stop assigning new replicas to the node immediately.
 5. Mark existing replicas suspect or untrusted until verified, repaired, or garbage-collected.
-6. Propagate via PostgreSQL polling/watch plus outbox event.
+6. Propagate via metadata store polling/watch plus outbox event.
 7. Head nodes cache revocation state only with a very short TTL.
 
 ## Metadata Privacy
@@ -146,7 +146,7 @@ Revocation:
 Assume metadata is sensitive even when object bytes are encrypted.
 
 Controls:
-- logs must omit object names, invite tokens, raw tenant secrets, envelope payloads, and full public keys unless specifically required
+- logs must omit plaintext object names, invite tokens, raw tenant secrets, envelope payloads, and full public keys unless specifically required
 - client IP logging requires explicit policy
 - metrics should aggregate by tenant, dataset, and node using opaque IDs or hashed labels
 - metrics must avoid high-cardinality object IDs
@@ -155,7 +155,7 @@ Controls:
 - audit stores actor, action, scope, result, request hash, and object/version IDs while avoiding plaintext object labels
 - tracing redacts request bodies and signed payloads by default
 
-If object names are user meaningful, v1 should support encrypted client-side names or opaque object IDs with optional encrypted metadata blobs.
+V1 uses opaque object IDs and HMAC-based lookup hashes. Human-readable object names, paths, or filenames belong in encrypted client-side metadata blobs. The lookup hash is computed as `HMAC-SHA256(dataset_lookup_secret, normalized_object_name)` so the metadata store can support human lookup without storing plaintext names.
 
 ## Audit Events
 
@@ -204,27 +204,27 @@ Required drills:
 - invalidate all outstanding invitations for a tenant
 - disable a tenant without deleting data
 - quarantine a head node
-- rebuild revocation cache from PostgreSQL
+- rebuild revocation cache from metadata store
 - produce an audit export for a tenant/time window
-- restore PostgreSQL to PITR and verify authority state consistency
+- restore metadata store to restore and verify authority state consistency
 - confirm no raw invite tokens or object plaintext metadata appear in logs
 
 ## Strong Warning
 
 The naive version is trusting head nodes because they are public infrastructure.
 
-That is the wrong boundary. Head nodes are protocol routers and cacheable policy enforcers. PostgreSQL plus signed envelopes is the authority. If a compromised head node can mint invites, authorize deletes, bypass revocation, or assign replicas without a PostgreSQL transaction, the security model collapses.
+That is the wrong boundary. Head nodes are protocol routers and cacheable policy enforcers. metadata store plus signed envelopes is the authority. If a compromised head node can mint invites, authorize deletes, bypass revocation, or assign replicas without a metadata transaction, the security model collapses.
 
 ## Research Incorporated
 
 Severus reviewed the v1 security authority model.
 
 Accepted findings:
-- v1 should use PostgreSQL-backed authority with offline/root admin signing keys and short-lived operational admin tokens.
+- v1 should use SQLite-backed authority with offline/root admin signing keys and short-lived operational admin tokens.
 - role-based admin identities are safer than a shared admin password.
 - invitations are bearer secrets and signed policy records, never loggable tokens.
 - signed envelopes need a canonical byte format before implementation.
-- head-node authority must be narrow and bounded by PostgreSQL decisions.
+- head-node authority must be narrow and bounded by metadata store decisions.
 - revocation state must propagate quickly and cannot be cached loosely.
 - audit and incident drills are beta blockers.
 

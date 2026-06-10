@@ -78,8 +78,8 @@ version = 1
 id = "late_ack_after_delete_epoch_bump"
 title = "late ACK after delete epoch bump"
 category = "partial_write"
-owner_crate = "hedgehog-metadata-pg"
-owner_test = "crates/hedgehog-metadata-pg/tests/workflows.rs"
+owner_crate = "hedgehog-metadata-sql"
+owner_test = "crates/hedgehog-metadata-sql/tests/workflows.rs"
 beta_blocker = true
 workflows = ["complete_replica", "delete_marker", "cleanup_conversion"]
 recovery_gates = ["reservation reconciliation", "repair deficit"]
@@ -101,7 +101,7 @@ Field rules:
 - `owner_crate` must be one crate from the ownership map.
 - `owner_test` must be a path that either exists or is expected to exist in the empty scaffold.
 - `beta_blocker = true` is required for every first-wave fixture.
-- `workflows` entries must come from the PostgreSQL workflow matrix when present.
+- `workflows` entries must come from the metadata workflow matrix when present.
 - `recovery_gates` entries must come from the readiness gate table when present.
 - `capacity_pressure` and `degraded_modes` must use labels from `hedgehog-types` or the seed registry.
 - `labels` use `domain.wire_label` so duplicate words remain unambiguous.
@@ -113,16 +113,16 @@ The initial `fixtures/scaffold/manifest.toml` must contain these scenario IDs:
 
 | Scenario ID | Owner crate | Category | Required coverage |
 | --- | --- | --- | --- |
-| `head_crash_after_one_fsynced_replica` | `hedgehog-metadata-pg` | `partial_write` | `create_write_intent`, `complete_replica`, `reservation.expired` |
-| `late_ack_after_reservation_expiry` | `hedgehog-metadata-pg` | `partial_write` | `complete_replica`, `expire_reservation`, `replica.stale` |
-| `late_ack_after_delete_epoch_bump` | `hedgehog-metadata-pg` | `partial_write` | `complete_replica`, `delete_marker`, `reservation.failed_cleanup_required` |
-| `revoked_node_final_result` | `hedgehog-metadata-pg` | `security` | `revoke_actor_or_node`, `complete_replica`, `replica.suspect` |
+| `head_crash_after_one_fsynced_replica` | `hedgehog-metadata-sql` | `partial_write` | `create_write_intent`, `complete_replica`, `reservation.expired` |
+| `late_ack_after_reservation_expiry` | `hedgehog-metadata-sql` | `partial_write` | `complete_replica`, `expire_reservation`, `replica.stale` |
+| `late_ack_after_delete_epoch_bump` | `hedgehog-metadata-sql` | `partial_write` | `complete_replica`, `delete_marker`, `reservation.failed_cleanup_required` |
+| `revoked_node_final_result` | `hedgehog-metadata-sql` | `security` | `revoke_actor_or_node`, `complete_replica`, `replica.suspect` |
 | `interrupted_repair_conversion` | `hedgehog-repair` | `partial_write` | `lease_repair`, `cleanup_conversion`, `repair_job.retry_wait` |
-| `postgres_pause_and_recover` | `hedgehog-local-cluster` | `recovery` | all recovery gates |
+| `metadata_pause_and_recover` | `hedgehog-local-cluster` | `recovery` | all recovery gates |
 | `restore_with_outbox_lag` | `hedgehog-local-cluster` | `recovery` | `claim_outbox`, `evaluate_recovery_gate`, `outbox` |
 | `temp_disk_full_during_upload` | `hedgehog-agent-store` | `capacity` | `capacity_report`, `capacity_pressure.critical` |
 | `repair_reserve_exhausted` | `hedgehog-repair` | `capacity` | `lease_repair`, `capacity_pressure.emergency` |
-| `orphan_cleanup_under_critical_capacity` | `hedgehog-metadata-pg` | `capacity` | `cleanup_conversion`, `capacity_pressure.critical` |
+| `orphan_cleanup_under_critical_capacity` | `hedgehog-metadata-sql` | `capacity` | `cleanup_conversion`, `capacity_pressure.critical` |
 | `redb_manifest_replay_after_crash` | `hedgehog-agent-store` | `agent_store` | manifest reconciliation |
 | `cancel_after_fsync_before_final_result` | `hedgehog-storage-agent` | `runtime` | `replica.streaming`, `replica.verifying` |
 | `lock_held_across_await_check` | `hedgehog-head` | `runtime` | `runtime.guardrails` |
@@ -134,7 +134,7 @@ The initial `fixtures/scaffold/manifest.toml` must contain these scenario IDs:
 First validator implementation:
 - parse TOML with `toml_edit` or `toml`
 - parse Cargo manifests with the same TOML parser, not string matching
-- parse Rust files with `syn` only where Rust semantics matter, especially enum variants and public metadata-pg functions
+- parse Rust files with `syn` only where Rust semantics matter, especially enum variants and public metadata-sql functions
 - parse SQL migration files initially as text plus bounded token rules, then add `sqlparser` if SQL checks become noisy
 - parse dashboard JSON with `serde_json`
 - scan Markdown only for the temporary seed-source comparison and uppercase quarantine, not as a long-term authority

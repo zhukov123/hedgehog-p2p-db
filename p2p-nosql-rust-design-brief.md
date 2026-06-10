@@ -1,8 +1,8 @@
-# Rust-First P2P NoSQL Design Brief
+# Rust-First P2P Object Store Design Brief
 
 ## Goal
 
-Design a production-ready peer-to-peer NoSQL storage system in Rust.
+Design a production-ready peer-to-peer object storage system in Rust.
 
 The system should support:
 - public head nodes on IP addresses and ports
@@ -15,9 +15,9 @@ The system should support:
 - built-in observability with Grafana and admin dashboards
 - capacity-based admission control that rejects writes before storage is exhausted
 
-Implementation sequencing is now canonicalized in [p2p-nosql-implementation-roadmap.md](p2p-nosql-implementation-roadmap.md). The first build target is metadata authority plus PostgreSQL-backed state transitions, not transport polish or direct P2P exchange.
+Implementation sequencing is now canonicalized in [p2p-nosql-implementation-roadmap.md](p2p-nosql-implementation-roadmap.md). The first build target is metadata authority plus SQLite-backed state transitions, not transport polish or direct P2P exchange.
 
-The first implementation contract is now canonicalized in [p2p-nosql-implementation-contract.md](p2p-nosql-implementation-contract.md): `sqlx`, deterministic CBOR signed envelopes, shared state labels, explicit write reservations, `redb` storage-agent manifests/journals, a 64 MiB whole-object limit, transfer classes, and an early generated local-cluster harness.
+The first implementation contract is now canonicalized in [p2p-nosql-implementation-contract.md](p2p-nosql-implementation-contract.md): `sqlx` with SQLite first, deterministic CBOR signed envelopes, shared state labels, explicit write reservations, `redb` storage-agent manifests/journals, a 64 MiB whole-object limit, transfer classes, and an early generated local-cluster harness.
 
 ## Core Product Shape
 
@@ -102,10 +102,11 @@ It should store:
 
 This plane is the brain of the system.
 
-V1 backend decision:
-- PostgreSQL is the default authoritative metadata store for the first production slice.
-- Use transactions, constraints, indexes, migrations, WAL durability, PITR, and rehearsed failover rather than building a custom consensus database immediately.
-- FoundationDB and Rust-native Raft remain later options if metadata scale, distribution, or product goals justify the operational cost.
+V1-alpha backend decision:
+- SQLite is the first authoritative metadata store.
+- Use transactions, constraints, indexes, migrations, deterministic tests, and local backup/export/restore workflows before adding distributed metadata complexity.
+- Keep metadata workflows backend-conscious but SQL-oriented so PostgreSQL can become a later production backend.
+- PostgreSQL, FoundationDB, and Rust-native Raft remain later options if metadata scale, concurrency, distribution, or product goals justify the operational cost.
 
 ## Rust Implementation Direction
 
@@ -126,7 +127,7 @@ Suggested Rust ecosystem building blocks:
 - metrics: `metrics`, `prometheus-client`, or OpenTelemetry Rust SDK
 - logging: `tracing`, `tracing-subscriber`
 - config: `figment` or plain typed config
-- metadata database access: `sqlx` with explicit migrations against PostgreSQL
+- metadata database access: `sqlx` with explicit migrations against SQLite first
 - storage-agent local data: file-per-object plus an embedded manifest/index store such as `redb`
 
 ## Required System Properties
@@ -303,26 +304,28 @@ Do not add these yet:
 ## Open Decisions
 
 - What is the canonical key recovery story?
-- What exact PostgreSQL HA and backup topology is required for beta?
+- What exact SQLite backup/export/restore workflow is required for beta?
 - What is the exact Rust workspace and crate layout for the first scaffold?
 - Should storage nodes use push, pull, or hybrid repair sync?
 - How strict should quota enforcement be at the user and tenant level?
 - How do we prevent abuse from volunteer storage nodes?
-- What is the concrete PostgreSQL schema, index, migration, and outbox plan for the metadata state machine?
+- What is the concrete SQLite-first SQL schema, index, migration, and outbox plan for the metadata state machine?
 - What is the exact capacity admission and repair-reserve formula?
 - What is the v1 security authority model for invitations, revocation, signed envelopes, and head-node limits?
 - What should the admin dashboard, metrics taxonomy, alerts, and incident runbooks look like against the canonical v1 model?
 - What is the crate-by-crate implementation roadmap and beta exit plan?
-- How should the degraded-mode cache fixtures be represented in `hedgehog-metadata-core`, `hedgehog-metadata-pg`, and `hedgehog-head` tests?
+- How should the degraded-mode cache fixtures be represented in `hedgehog-metadata-core`, `hedgehog-metadata-sql`, and `hedgehog-head` tests?
 
 ## Working Thesis
 
-The safest architecture is:
+The accepted v1-alpha architecture is:
 - public head nodes for routing and coordination
-- PostgreSQL as the strongly consistent v1 metadata service behind them
+- SQLite as the first transactional metadata authority
 - client-side encryption with user-owned keys
 - untrusted storage nodes that only hold ciphertext
 - whole-object replication
 - background re-replication and repair
 - hard admission control before storage exhaustion
 - Rust for the entire system stack
+
+PostgreSQL remains a deferred production backend, not the first implementation target.

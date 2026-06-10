@@ -1,4 +1,4 @@
-# P2P NoSQL Metadata Plane Design Notes
+# P2P Object Store Metadata Plane Design Notes
 
 ## Slice
 
@@ -28,24 +28,26 @@ It does not own:
 
 ## Recommended First Shape
 
-Use a single strongly consistent metadata cluster for the first production slice.
+Use a single transactional metadata authority for the first implementation slice.
 
 Recommendation:
-- PostgreSQL as the authoritative v1 metadata store
-- one primary with tested failover, PITR, backups, and restore rehearsals
+- SQLite as the authoritative v1-alpha metadata store
+- a single metadata writer authority for the first local and small-cluster builds
+- local backup/export/restore drills before beta
 - `sqlx` for Rust database access and explicit migrations
 - `axum` for admin and internal APIs around the metadata boundary
 - `tonic` or typed HTTP for head-node to metadata-plane calls
 - every mutating metadata command is idempotent by `command_id`
 
-The first version should not shard metadata. Sharding before the workflows are stable would multiply every design problem: repair, capacity accounting, leases, schema migration, audit, and backup.
+The first version should not shard metadata or require a distributed metadata database. Sharding before the workflows are stable would multiply every design problem: repair, capacity accounting, leases, schema migration, audit, and backup.
 
-Rust-native Raft remains valuable, but not as the v1 default. `openraft` plus `redb` or RocksDB would make the project responsible for membership, snapshots, log compaction, corruption recovery, migrations, state-machine determinism, backup/restore, rolling upgrades, and operator playbooks before the product model itself has settled. FoundationDB is a credible later metadata backend if scale demands distributed transactional storage, but it adds operational and data-modeling burden early.
+PostgreSQL remains the preferred later production SQL backend when multi-head concurrency, stronger operational backup/restore, backup archiving, failover, and mature database observability are needed. Rust-native Raft remains valuable, but not as the v1 default. `openraft` plus `redb` or RocksDB would make the project responsible for membership, snapshots, log compaction, corruption recovery, migrations, state-machine determinism, backup/restore, rolling upgrades, and operator playbooks before the product model itself has settled. FoundationDB is a credible later metadata backend if scale demands distributed transactional storage, but it adds operational and data-modeling burden early.
 
 Decision:
-- v1 uses PostgreSQL for metadata reliability and implementation speed.
+- v1-alpha uses SQLite for metadata simplicity and implementation speed.
+- PostgreSQL is deferred to the production backend track.
 - FoundationDB is deferred until metadata scale or distribution pressure justifies it.
-- Rust-native Raft is a research/v2 path, not the first production control plane.
+- Rust-native Raft is a research/v3 path, not the first control plane.
 
 ## Topology
 
@@ -53,11 +55,11 @@ The metadata plane is a separate service behind the head tier.
 
 Components:
 - `head-node`: public ingress, auth, request validation, storage-agent routing
-- `metadata-node`: member of the strongly consistent metadata cluster
+- `metadata-store`: SQLite database plus metadata workflow service in v1-alpha
 - `storage-agent`: holds ciphertext and reports state through outbound control channels
 - `client`: encrypts, uploads, fetches, decrypts
 
-Head nodes may cache read-only metadata with short TTLs, but all placement decisions and all state transitions must be committed through the metadata cluster.
+Head nodes may cache read-only metadata with short TTLs, but all placement decisions and all state transitions must be committed through the metadata authority.
 
 ## State Model
 
@@ -169,7 +171,7 @@ Fields:
 
 ### Mutation Outbox
 
-PostgreSQL should expose committed metadata transitions through a durable outbox table rather than relying on head-node memory.
+metadata store should expose committed metadata transitions through a durable outbox table rather than relying on head-node memory.
 
 Fields:
 - `outbox_id`
@@ -294,7 +296,7 @@ Keep command validation in `metadata-core`, not in the HTTP layer, so tests can 
 
 ## Decisions Made In This Pass
 
-- Start with PostgreSQL as the authoritative v1 metadata store, not a custom Rust Raft service.
+- Start with SQLite as the authoritative v1-alpha metadata store, not a custom Rust Raft service.
 - Head nodes are allowed to cache committed read state only; they do not own placement or lease decisions.
 - Writes require metadata reservations and fencing-token leases before storage agents mutate disk.
 - Metadata capacity accounting is pessimistic and may reject writes before storage agents report full usage.
@@ -305,10 +307,11 @@ Keep command validation in `metadata-core`, not in the HTTP layer, so tests can 
 
 ## Research Incorporated
 
-Severus reviewed the metadata-plane options and recommended PostgreSQL for v1.
+Earlier review recommended PostgreSQL for v1. The accepted current decision supersedes that for v1-alpha: start with SQLite, while keeping PostgreSQL as the deferred production SQL backend.
 
 Accepted findings:
-- PostgreSQL is the safest first metadata plane because it gives mature transactions, constraints, indexes, migrations, WAL durability, HA tooling, PITR, and familiar backup/restore practices.
+- SQLite is the simplest first metadata plane because it gives local transactions, constraints, indexes, migrations, and easy test setup.
+- PostgreSQL remains the likely production backend once multi-head concurrency, HA, and mature operational backup/restore are required.
 - FoundationDB remains technically strong but should wait until the team needs distributed transactional scale and is ready for KV-layer modeling.
 - `openraft` plus `redb` or RocksDB should wait because it makes the project responsible for building and operating a database before the product semantics are stable.
 - The term "P2P" must not obscure the need for a boring, highly reliable control plane.
@@ -320,7 +323,7 @@ The storage-agent protocol slice is captured in `p2p-nosql-storage-agent-protoco
 
 The replication and repair state-machine slice is captured in `p2p-nosql-replication-repair-state-machine.md`.
 
-The PostgreSQL schema plan is captured in `p2p-nosql-postgresql-schema-plan.md`.
+The metadata store schema plan is captured in `p2p-nosql-postgresql-schema-plan.md`.
 
 The capacity admission and repair-reserve slice is captured in `p2p-nosql-capacity-admission.md`.
 

@@ -27,13 +27,13 @@ If an older document uses conflicting implementation labels, crate names, or wor
 | Concept | Owner crate | Allowed dependents | Forbidden dependents | Golden source | First fixtures |
 | --- | --- | --- | --- | --- | --- |
 | Stable IDs, state labels, reason codes, transfer classes | `hedgehog-types` | all crates | none | generated Rust enums plus SQL label tests | `crates/hedgehog-types/tests/state_labels.rs` |
-| Signed envelopes and canonical bytes | `hedgehog-crypto` | head, metadata-pg, admin, CLI | storage-agent business logic deciding authority | deterministic CBOR vectors | `crates/hedgehog-crypto/tests/envelope_vectors.rs` |
-| Semantic state transitions | `hedgehog-metadata-core` | metadata-pg, repair tests, local-cluster tests | head raw SQL, agent raw SQL, admin raw SQL | pure Rust transition tables | `crates/hedgehog-metadata-core/tests/transitions.rs` |
-| PostgreSQL durable workflows | `hedgehog-metadata-pg` | head, repair, admin, CLI, local-cluster | direct SQL mutation from service crates | migrations plus workflow matrix below | `crates/hedgehog-metadata-pg/tests/workflows.rs` |
-| Storage-agent local manifest and journal | `hedgehog-agent-store` | storage-agent, local-cluster tests | metadata-pg, head | `redb` schema plus crash fixtures | `crates/hedgehog-agent-store/tests/crash_reconcile.rs` |
-| Storage-agent service protocol | `hedgehog-storage-agent` | local-cluster | metadata-pg direct authority | protobuf or RPC schema and command journal | `crates/hedgehog-storage-agent/tests/protocol_idempotency.rs` |
+| Signed envelopes and canonical bytes | `hedgehog-crypto` | head, metadata-sql, admin, CLI | storage-agent business logic deciding authority | deterministic CBOR vectors | `crates/hedgehog-crypto/tests/envelope_vectors.rs` |
+| Semantic state transitions | `hedgehog-metadata-core` | metadata-sql, repair tests, local-cluster tests | head raw SQL, agent raw SQL, admin raw SQL | pure Rust transition tables | `crates/hedgehog-metadata-core/tests/transitions.rs` |
+| SQLite-first durable workflows | `hedgehog-metadata-sql` | head, repair, admin, CLI, local-cluster | direct SQL mutation from service crates | migrations plus workflow matrix below | `crates/hedgehog-metadata-sql/tests/workflows.rs` |
+| Storage-agent local manifest and journal | `hedgehog-agent-store` | storage-agent, local-cluster tests | metadata-sql, head | `redb` schema plus crash fixtures | `crates/hedgehog-agent-store/tests/crash_reconcile.rs` |
+| Storage-agent service protocol | `hedgehog-storage-agent` | local-cluster | metadata-sql direct authority | protobuf or RPC schema and command journal | `crates/hedgehog-storage-agent/tests/protocol_idempotency.rs` |
 | Public head service | `hedgehog-head` | local-cluster | storage-agent deciding metadata authority | service workflow wrappers | `crates/hedgehog-head/tests/degraded_cache.rs` |
-| Repair scheduler | `hedgehog-repair` | local-cluster | direct replica mutation without metadata-pg workflow | repair lease workflows | `crates/hedgehog-repair/tests/pressure_ordering.rs` |
+| Repair scheduler | `hedgehog-repair` | local-cluster | direct replica mutation without metadata-sql workflow | repair lease workflows | `crates/hedgehog-repair/tests/pressure_ordering.rs` |
 | Admin and observability labels | `hedgehog-admin`, `hedgehog-observability` | local-cluster | defining new state names | `hedgehog-types` display mapping | `crates/hedgehog-admin/tests/filter_labels.rs` |
 | Generated local cluster | `hedgehog-local-cluster` | CI | production-only hidden behavior | Compose and fixture manifests | `crates/hedgehog-local-cluster/tests/chaos.rs` |
 
@@ -62,16 +62,16 @@ cargo xtask validate-scaffold-contract
 
 The command should fail if any SQL migration, metric, admin filter, or fixture uses non-canonical implementation labels.
 
-## PostgreSQL Workflow Matrix
+## SQL Workflow Matrix
 
-Every metadata mutation must be a named `hedgehog-metadata-pg` workflow. Service crates must not call generic update APIs.
+Every metadata mutation must be a named `hedgehog-metadata-sql` workflow. Service crates must not call generic update APIs.
 
 | Workflow | Lock order | Isolation target | Idempotency scope | Audit timing | Outbox timing | Invariant checks |
 | --- | --- | --- | --- | --- | --- | --- |
-| `create_write_intent` | tenant, dataset, object key, capacity rows, selected nodes | `READ COMMITTED` plus guarded updates; escalate on conflicts | `(tenant_id, object_key, write, key)` | append in transaction after decision | append reservation event in same transaction | quota, pressure, placement, reservation |
+| `create_write_intent` | tenant, dataset, object id or lookup hash, capacity rows, selected nodes | SQLite transaction plus guarded updates; backend may strengthen isolation later | `(tenant_id, dataset_id, object_ref, write, key)` | append in transaction after decision | append reservation event in same transaction | quota, pressure, placement, reservation |
 | `complete_replica` | version, replica row, reservation, node | guarded `UPDATE ... WHERE fencing_token AND placement_epoch AND delete_epoch` | `(replica_id, final_result_id)` | append accepted or stale completion | append verify or cleanup command | fencing, delete epoch, capacity |
-| `commit_version` | object key, version, replicas, reservation | guarded transaction; retry serialization/deadlock | `(tenant_id, object_key, commit, key)` | append before commit | append visibility event in same transaction | min replicas, digest, placement |
-| `delete_marker` | object key, previous head, new delete version, replicas | guarded head-pointer update | `(tenant_id, object_key, delete, key)` | append delete decision | append delete propagation | delete epoch, retention |
+| `commit_version` | object id, version, replicas, reservation | guarded transaction; retry serialization/deadlock | `(tenant_id, dataset_id, object_ref, commit, key)` | append before commit | append visibility event in same transaction | min replicas, digest, placement |
+| `delete_marker` | object id, previous head, new delete version, replicas | guarded head-pointer update | `(tenant_id, dataset_id, object_ref, delete, key)` | append delete decision | append delete propagation | delete epoch, retention |
 | `lease_repair` | version, replica set, repair job, capacity rows | guarded lease claim | `(repair_job_id, lease_attempt)` | append lease decision | append repair command | pressure, repair reserve, fencing |
 | `expire_reservation` | reservation, version, replicas, capacity rows | guarded expiry transition | `(reservation_id, expiry_attempt)` | append expiry decision | append cleanup command | stale bytes classification |
 | `cleanup_conversion` | reservation, replica, node, capacity rows | guarded conversion | `(reservation_id, node_id, cleanup_attempt)` | append cleanup classification | append delete/local cleanup | orphan and temp accounting |
@@ -96,7 +96,7 @@ enum AuthorityCacheDecision<T> {
 }
 ```
 
-Mutation workflows must call `hedgehog-metadata-pg` directly and cannot accept `Fresh<T>` as authority. Raw cached tenant, dataset, revocation, placement, invitation, capacity, or visibility records are allowed only in read-only status rendering modules.
+Mutation workflows must call `hedgehog-metadata-sql` directly and cannot accept `Fresh<T>` as authority. Raw cached tenant, dataset, revocation, placement, invitation, capacity, or visibility records are allowed only in read-only status rendering modules.
 
 ## Recovery Readiness Gate
 
@@ -105,10 +105,10 @@ The cluster is not `normal` until one operator-visible gate says all checks pass
 | Gate | Must prove |
 | --- | --- |
 | migrations | expected migration version is installed |
-| metadata invariants | core invariant suite passes against PostgreSQL |
+| metadata invariants | core invariant suite passes against the SQLite metadata store |
 | audit continuity | hash chain or checkpoint continuity is valid |
 | outbox | lag below threshold and expired claims reconciled |
-| cache rebuild | authority caches rebuilt from PostgreSQL revisions |
+| cache rebuild | authority caches rebuilt from metadata revisions |
 | manifest reconciliation | agents have classified local bytes and journals |
 | reservation reconciliation | committed, reserved, temp, orphan, and cleanup bytes agree |
 | repair deficit | below-minimum durability objects are known and queued |
