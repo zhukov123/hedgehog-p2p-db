@@ -106,12 +106,15 @@ public sealed class LocalCluster : IAsyncDisposable
         Directory.CreateDirectory(Path.GetDirectoryName(MetadataPath)!);
         Directory.CreateDirectory(Path.Combine(RuntimeRoot, "storage"));
 
-        await using (var migrationConnection = new SqliteConnection(ConnectionString))
+        await using (var migrationConnection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false))
         {
-            await migrationConnection.OpenAsync(cancellationToken).ConfigureAwait(false);
             await SqliteMetadataAuthority.CreateMigrationRunner()
                 .ApplyMigrationsAsync(migrationConnection, cancellationToken)
                 .ConfigureAwait(false);
+            await ExecuteConnectionPragmaAsync(
+                migrationConnection,
+                "PRAGMA journal_mode = WAL;",
+                cancellationToken).ConfigureAwait(false);
         }
 
         for (var i = 0; i < options.StorageNodeCount; i++)
@@ -210,8 +213,7 @@ public sealed class LocalCluster : IAsyncDisposable
         var tenantHeads = new List<LocalHeadNode>();
         for (var i = 0; i < options.HeadCount; i++)
         {
-            var connection = new SqliteConnection(ConnectionString);
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
             headConnections.Add(connection);
 
             var headId = $"{tenantId}-{datasetId}-head-{i + 1}";
@@ -275,8 +277,7 @@ public sealed class LocalCluster : IAsyncDisposable
         params (string Name, object? Value)[] parameters)
     {
         RequireStarted();
-        await using var connection = new SqliteConnection(ConnectionString);
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
         foreach (var (name, value) in parameters)
@@ -311,6 +312,27 @@ public sealed class LocalCluster : IAsyncDisposable
         DataSource = MetadataPath,
         Cache = SqliteCacheMode.Shared,
     }.ToString();
+
+    private async Task<SqliteConnection> OpenConnectionAsync(CancellationToken cancellationToken)
+    {
+        var connection = new SqliteConnection(ConnectionString);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await ExecuteConnectionPragmaAsync(connection, "PRAGMA foreign_keys = ON;", cancellationToken)
+            .ConfigureAwait(false);
+        await ExecuteConnectionPragmaAsync(connection, "PRAGMA busy_timeout = 10000;", cancellationToken)
+            .ConfigureAwait(false);
+        return connection;
+    }
+
+    private static async Task ExecuteConnectionPragmaAsync(
+        SqliteConnection connection,
+        string sql,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
 
     private void RequireStarted()
     {

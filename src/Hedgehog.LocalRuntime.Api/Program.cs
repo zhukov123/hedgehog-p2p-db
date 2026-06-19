@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Hedgehog.Client;
 using Hedgehog.Head;
 using Hedgehog.LocalRuntime;
@@ -25,6 +26,7 @@ if (resetRuntime && Directory.Exists(runtimeRoot))
 var cluster = new LocalCluster(LocalClusterOptions.CreateDefault(runtimeRoot));
 await cluster.StartAsync();
 
+builder.Services.AddSingleton<LocalRuntimeMetrics>();
 builder.Services.AddSingleton(cluster);
 
 var app = builder.Build();
@@ -54,21 +56,45 @@ app.MapGet("/runtime/status", async (LocalCluster runtime, CancellationToken can
             node.Replicas.Count)).ToArray()));
 });
 
+app.MapGet("/metrics", async (
+    LocalCluster runtime,
+    LocalRuntimeMetrics metrics,
+    CancellationToken cancellationToken) =>
+{
+    var snapshot = await runtime.SnapshotAsync(cancellationToken);
+    var metadataCounts = await LoadMetadataCountsAsync(runtime, cancellationToken);
+    return Results.Text(
+        metrics.RenderPrometheus(snapshot, metadataCounts),
+        "text/plain; version=0.0.4; charset=utf-8");
+});
+
 app.MapPost("/runtime/tenants", async (
     CreateTenantRequest request,
     LocalCluster runtime,
+    LocalRuntimeMetrics metrics,
     CancellationToken cancellationToken) =>
 {
+    var start = Stopwatch.GetTimestamp();
     if (string.IsNullOrWhiteSpace(request.TenantId) || string.IsNullOrWhiteSpace(request.DatasetId))
     {
+        metrics.RecordOperation("create_tenant", "bad_request", Stopwatch.GetElapsedTime(start));
         return Results.BadRequest(new ErrorDto("tenantId and datasetId are required"));
     }
 
-    var tenant = await runtime.AddTenantAsync(request.TenantId, request.DatasetId, cancellationToken);
-    return Results.Ok(new TenantCreatedDto(
-        tenant.TenantId,
-        tenant.DatasetId,
-        tenant.RequiredReplicaCount));
+    try
+    {
+        var tenant = await runtime.AddTenantAsync(request.TenantId, request.DatasetId, cancellationToken);
+        metrics.RecordOperation("create_tenant", "ok", Stopwatch.GetElapsedTime(start));
+        return Results.Ok(new TenantCreatedDto(
+            tenant.TenantId,
+            tenant.DatasetId,
+            tenant.RequiredReplicaCount));
+    }
+    catch (InvalidOperationException ex)
+    {
+        metrics.RecordOperation("create_tenant", "error", Stopwatch.GetElapsedTime(start));
+        return Results.Problem(ex.Message, statusCode: StatusCodes.Status500InternalServerError);
+    }
 });
 
 app.MapPost("/runtime/tenants/{tenantId}/datasets/{datasetId}/objects", async (
@@ -76,12 +102,15 @@ app.MapPost("/runtime/tenants/{tenantId}/datasets/{datasetId}/objects", async (
     string datasetId,
     PutObjectRequest request,
     LocalCluster runtime,
+    LocalRuntimeMetrics metrics,
     CancellationToken cancellationToken) =>
 {
+    var start = Stopwatch.GetTimestamp();
     if (string.IsNullOrWhiteSpace(request.ClientId)
         || string.IsNullOrWhiteSpace(request.Name)
         || request.Text is null)
     {
+        metrics.RecordOperation("put", "bad_request", Stopwatch.GetElapsedTime(start));
         return Results.BadRequest(new ErrorDto("clientId, name, and text are required"));
     }
 
@@ -89,6 +118,7 @@ app.MapPost("/runtime/tenants/{tenantId}/datasets/{datasetId}/objects", async (
     {
         var client = runtime.CreateClientForTenant(tenantId, datasetId, request.ClientId, request.PreferLastHead);
         var result = await client.PutTextAsync(request.Name, request.Text, cancellationToken);
+        metrics.RecordOperation("put", "ok", Stopwatch.GetElapsedTime(start), System.Text.Encoding.UTF8.GetByteCount(request.Text));
         return Results.Ok(new PutObjectResponse(
             result.ClientId,
             result.HeadId,
@@ -98,6 +128,7 @@ app.MapPost("/runtime/tenants/{tenantId}/datasets/{datasetId}/objects", async (
     }
     catch (InvalidOperationException ex)
     {
+        metrics.RecordOperation("put", "not_found", Stopwatch.GetElapsedTime(start));
         return Results.NotFound(new ErrorDto(ex.Message));
     }
 });
@@ -109,10 +140,13 @@ app.MapGet("/runtime/tenants/{tenantId}/datasets/{datasetId}/objects", async (
     string clientId,
     bool? preferLastHead,
     LocalCluster runtime,
+    LocalRuntimeMetrics metrics,
     CancellationToken cancellationToken) =>
 {
+    var start = Stopwatch.GetTimestamp();
     if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(clientId))
     {
+        metrics.RecordOperation("get", "bad_request", Stopwatch.GetElapsedTime(start));
         return Results.BadRequest(new ErrorDto("name and clientId are required"));
     }
 
@@ -120,10 +154,12 @@ app.MapGet("/runtime/tenants/{tenantId}/datasets/{datasetId}/objects", async (
     {
         var client = runtime.CreateClientForTenant(tenantId, datasetId, clientId, preferLastHead == true);
         var result = await client.GetAsync(name, cancellationToken);
+        metrics.RecordOperation("get", "ok", Stopwatch.GetElapsedTime(start), result.Plaintext.LongLength);
         return Results.Ok(new GetObjectResponse(clientId, name, result));
     }
     catch (InvalidOperationException ex)
     {
+        metrics.RecordOperation("get", "not_found", Stopwatch.GetElapsedTime(start));
         return Results.NotFound(new ErrorDto(ex.Message));
     }
 });
@@ -135,10 +171,13 @@ app.MapDelete("/runtime/tenants/{tenantId}/datasets/{datasetId}/objects", async 
     string clientId,
     bool? preferLastHead,
     LocalCluster runtime,
+    LocalRuntimeMetrics metrics,
     CancellationToken cancellationToken) =>
 {
+    var start = Stopwatch.GetTimestamp();
     if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(clientId))
     {
+        metrics.RecordOperation("delete", "bad_request", Stopwatch.GetElapsedTime(start));
         return Results.BadRequest(new ErrorDto("name and clientId are required"));
     }
 
@@ -146,15 +185,35 @@ app.MapDelete("/runtime/tenants/{tenantId}/datasets/{datasetId}/objects", async 
     {
         var client = runtime.CreateClientForTenant(tenantId, datasetId, clientId, preferLastHead == true);
         await client.DeleteAsync(name, cancellationToken);
+        metrics.RecordOperation("delete", "ok", Stopwatch.GetElapsedTime(start));
         return Results.Ok(new DeleteObjectResponse(clientId, tenantId, datasetId, name, Deleted: true));
     }
     catch (InvalidOperationException ex)
     {
+        metrics.RecordOperation("delete", "not_found", Stopwatch.GetElapsedTime(start));
         return Results.NotFound(new ErrorDto(ex.Message));
     }
 });
 
 app.Run();
+
+static async Task<IReadOnlyDictionary<string, long>> LoadMetadataCountsAsync(
+    LocalCluster runtime,
+    CancellationToken cancellationToken)
+{
+    var counts = new Dictionary<string, long>(StringComparer.Ordinal)
+    {
+        ["tenants"] = await runtime.ScalarLongAsync("SELECT COUNT(*) FROM tenants;", cancellationToken),
+        ["datasets"] = await runtime.ScalarLongAsync("SELECT COUNT(*) FROM datasets;", cancellationToken),
+        ["objects"] = await runtime.ScalarLongAsync("SELECT COUNT(*) FROM objects;", cancellationToken),
+        ["object_versions"] = await runtime.ScalarLongAsync("SELECT COUNT(*) FROM object_versions;", cancellationToken),
+        ["healthy_replicas"] = await runtime.ScalarLongAsync("SELECT COUNT(*) FROM replicas WHERE state = 'healthy';", cancellationToken),
+        ["delete_markers"] = await runtime.ScalarLongAsync("SELECT COUNT(*) FROM object_versions WHERE state = 'delete_marker';", cancellationToken),
+        ["audit_events"] = await runtime.ScalarLongAsync("SELECT COUNT(*) FROM audit_events;", cancellationToken),
+    };
+
+    return counts;
+}
 
 public sealed record CreateTenantRequest(string TenantId, string DatasetId);
 

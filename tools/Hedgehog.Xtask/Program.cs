@@ -6,7 +6,7 @@ using Hedgehog.Types;
 var parsedCommand = CommandLine.Parse(args);
 if (parsedCommand is null)
 {
-    Console.Error.WriteLine("usage: dotnet run --project tools/Hedgehog.Xtask -- <validate-scaffold-contract|run-local-runtime-smoke> [--json] [--allow-missing-scaffold] [--runtime-root <path>]");
+    Console.Error.WriteLine("usage: dotnet run --project tools/Hedgehog.Xtask -- <validate-scaffold-contract|run-local-runtime-smoke|run-local-runtime-stress> [--json] [--allow-missing-scaffold] [--runtime-root <path>] [--tenant-count <n>] [--objects-per-tenant <n>] [--payload-bytes <n>]");
     return 2;
 }
 
@@ -53,6 +53,52 @@ if (parsedCommand.Command == "run-local-runtime-smoke")
     return 0;
 }
 
+if (parsedCommand.Command == "run-local-runtime-stress")
+{
+    var useDefaultRuntimeRoot = parsedCommand.RuntimeRoot is null;
+    var runtimeRoot = parsedCommand.RuntimeRoot
+        ?? Path.Combine(Directory.GetCurrentDirectory(), ".hedgehog", "local-runtime-stress");
+    if (Directory.Exists(runtimeRoot))
+    {
+        if (!useDefaultRuntimeRoot)
+        {
+            Console.Error.WriteLine($"custom runtime root already exists and will not be deleted automatically: {runtimeRoot}");
+            return 1;
+        }
+
+        Directory.Delete(runtimeRoot, recursive: true);
+    }
+
+    var result = await LocalRuntimeStress.RunAsync(
+        new LocalRuntimeStressOptions(
+            runtimeRoot,
+            parsedCommand.TenantCount ?? 3,
+            parsedCommand.ObjectsPerTenant ?? 12,
+            parsedCommand.PayloadBytes ?? 512));
+
+    if (parsedCommand.Json)
+    {
+        Console.WriteLine(JsonSerializer.Serialize(result, jsonOptions));
+    }
+    else
+    {
+        Console.WriteLine("local runtime stress passed");
+        Console.WriteLine($"runtime_root={result.RuntimeRoot}");
+        Console.WriteLine($"tenants={result.TenantCount}");
+        Console.WriteLine($"heads={result.HeadCount}");
+        Console.WriteLine($"storage_nodes={result.StorageNodeCount}");
+        Console.WriteLine($"objects_written={result.ObjectsWritten}");
+        Console.WriteLine($"reads_verified={result.ReadsVerified}");
+        Console.WriteLine($"deletes_verified={result.DeletesVerified}");
+        Console.WriteLine($"metadata_object_rows={result.MetadataObjectRows}");
+        Console.WriteLine($"metadata_version_rows={result.MetadataVersionRows}");
+        Console.WriteLine($"healthy_replica_rows={result.HealthyReplicaRows}");
+        Console.WriteLine($"delete_marker_rows={result.DeleteMarkerRows}");
+    }
+
+    return 0;
+}
+
 var validator = new ScaffoldContractValidator(Directory.GetCurrentDirectory(), parsedCommand.AllowMissingScaffold);
 var failures = validator.Validate();
 
@@ -85,11 +131,18 @@ else
 
 return failures.Count == 0 ? 0 : 1;
 
-internal sealed record CommandLine(string Command, bool Json, bool AllowMissingScaffold, string? RuntimeRoot)
+internal sealed record CommandLine(
+    string Command,
+    bool Json,
+    bool AllowMissingScaffold,
+    string? RuntimeRoot,
+    int? TenantCount,
+    int? ObjectsPerTenant,
+    int? PayloadBytes)
 {
     public static CommandLine? Parse(string[] args)
     {
-        if (args.Length == 0 || args[0] is not ("validate-scaffold-contract" or "run-local-runtime-smoke"))
+        if (args.Length == 0 || args[0] is not ("validate-scaffold-contract" or "run-local-runtime-smoke" or "run-local-runtime-stress"))
         {
             return null;
         }
@@ -98,6 +151,9 @@ internal sealed record CommandLine(string Command, bool Json, bool AllowMissingS
         var json = false;
         var allowMissingScaffold = false;
         string? runtimeRoot = null;
+        int? tenantCount = null;
+        int? objectsPerTenant = null;
+        int? payloadBytes = null;
 
         for (var i = 1; i < args.Length; i++)
         {
@@ -117,12 +173,45 @@ internal sealed record CommandLine(string Command, bool Json, bool AllowMissingS
 
                     runtimeRoot = args[++i];
                     break;
+                case "--tenant-count":
+                    if (i + 1 >= args.Length || !TryPositiveInt(args[++i], out tenantCount))
+                    {
+                        return null;
+                    }
+
+                    break;
+                case "--objects-per-tenant":
+                    if (i + 1 >= args.Length || !TryPositiveInt(args[++i], out objectsPerTenant))
+                    {
+                        return null;
+                    }
+
+                    break;
+                case "--payload-bytes":
+                    if (i + 1 >= args.Length || !TryPositiveInt(args[++i], out payloadBytes))
+                    {
+                        return null;
+                    }
+
+                    break;
                 default:
                     return null;
             }
         }
 
-        return new CommandLine(command, json, allowMissingScaffold, runtimeRoot);
+        return new CommandLine(command, json, allowMissingScaffold, runtimeRoot, tenantCount, objectsPerTenant, payloadBytes);
+    }
+
+    private static bool TryPositiveInt(string value, out int? parsed)
+    {
+        if (int.TryParse(value, out var number) && number > 0)
+        {
+            parsed = number;
+            return true;
+        }
+
+        parsed = null;
+        return false;
     }
 }
 

@@ -67,6 +67,30 @@ delete_verified=True
 healthy_replica_rows=6
 ```
 
+## Local Runtime Stress
+
+The stress gate creates three tenant datasets, writes 36 encrypted objects through both head nodes, verifies cross-client reads, deletes every fourth object, confirms delete markers block later reads, and checks that plaintext names did not leak into object IDs.
+
+```text
+dotnet run --project tools/Hedgehog.Xtask -- run-local-runtime-stress
+```
+
+Larger local runs can tune `--tenant-count`, `--objects-per-tenant`, and `--payload-bytes`.
+
+Expected shape:
+
+```text
+local runtime stress passed
+tenants=3
+heads=8
+storage_nodes=3
+objects_written=36
+reads_verified=63
+deletes_verified=9
+healthy_replica_rows=108
+delete_marker_rows=9
+```
+
 ## Curlable Local Runtime API
 
 Start a fresh local runtime API:
@@ -91,3 +115,24 @@ curl -fsS 'http://localhost:5090/runtime/tenants/tenant-alpha/datasets/dataset-d
 
 curl -fsS -X DELETE 'http://localhost:5090/runtime/tenants/tenant-alpha/datasets/dataset-docs/objects?clientId=alpha-deleter&name=alpha-report.txt'
 ```
+
+Prometheus metrics are exposed by the same API:
+
+```text
+curl -fsS http://localhost:5090/metrics
+```
+
+## Grafana Dashboard
+
+Start the local runtime API, then start Prometheus and Grafana:
+
+```text
+HEDGEHOG_RUNTIME_ROOT="$(pwd)/.hedgehog/observability-runtime" HEDGEHOG_RUNTIME_RESET=true \
+  dotnet run --project src/Hedgehog.LocalRuntime.Api --urls http://localhost:5090
+```
+
+```text
+docker compose -f observability/docker-compose.yml up
+```
+
+Open Grafana at `http://localhost:3000` and use the provisioned `Hedgehog / Hedgehog Local Runtime` dashboard. Prometheus is available at `http://localhost:9090` and scrapes `http://host.docker.internal:5090/metrics`.

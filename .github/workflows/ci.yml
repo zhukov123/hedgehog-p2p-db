@@ -43,3 +43,6 @@ jobs:
 
       - name: Run Local Runtime Smoke
         run: dotnet run --project tools/Hedgehog.Xtask -- run-local-runtime-smoke
+
+      - name: Run Local Runtime Stress
+        run: dotnet run --project tools/Hedgehog.Xtask -- run-local-runtime-stress
