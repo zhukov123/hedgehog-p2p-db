@@ -13,4 +13,9 @@ public sealed class SqliteMetadataAuthority
     {
         return new SqliteMigrationRunner(CreateMigrationSource());
     }
+
+    public static ISqliteMetadataWorkflowStore CreateWorkflowStore()
+    {
+        return new SqliteMetadataWorkflowStore();
+    }
 }

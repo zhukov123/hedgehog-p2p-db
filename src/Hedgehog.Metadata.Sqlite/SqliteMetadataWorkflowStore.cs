@@ -1,0 +1,988 @@
+using System.Data;
+using System.Data.Common;
+using System.Security.Cryptography;
+using System.Text;
+using Hedgehog.Metadata.Core;
+
+namespace Hedgehog.Metadata.Sqlite;
+
+public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
+{
+    public async Task<SqliteWorkflowResult> CreateWriteIntentAsync(
+        IDbConnection connection,
+        SqliteCreateWriteIntentRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateCreateWriteIntent(request);
+        var db = RequireDbConnection(connection);
+        await EnsureOpenAsync(db, cancellationToken).ConfigureAwait(false);
+        await using var transaction = await db.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            var replay = await TryBeginIdempotencyAsync(
+                db,
+                transaction,
+                request.IdempotencyKey,
+                request.TenantId,
+                request.DatasetId,
+                MetadataWorkflowNames.CreateWriteIntent,
+                request.ActorId,
+                request,
+                request.RequestedAt,
+                cancellationToken).ConfigureAwait(false);
+
+            if (replay)
+            {
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                return new SqliteWorkflowResult(MetadataWorkflowNames.CreateWriteIntent, "replayed", Replayed: true, []);
+            }
+
+            await ExecuteAsync(
+                db,
+                transaction,
+                """
+                INSERT INTO objects (
+                    object_id,
+                    tenant_id,
+                    dataset_id,
+                    object_lookup_hash,
+                    lookup_key_id,
+                    current_version_id,
+                    state,
+                    placement_epoch,
+                    delete_epoch,
+                    created_at_ms,
+                    updated_at_ms
+                )
+                VALUES (
+                    @object_id,
+                    @tenant_id,
+                    @dataset_id,
+                    @object_lookup_hash,
+                    @lookup_key_id,
+                    NULL,
+                    'active',
+                    @placement_epoch,
+                    @delete_epoch,
+                    @now_ms,
+                    @now_ms
+                )
+                ON CONFLICT (object_id) DO UPDATE SET
+                    lookup_key_id = excluded.lookup_key_id,
+                    updated_at_ms = excluded.updated_at_ms;
+                """,
+                cancellationToken,
+                ("@object_id", request.ObjectId),
+                ("@tenant_id", request.TenantId),
+                ("@dataset_id", request.DatasetId),
+                ("@object_lookup_hash", request.ObjectLookupHash),
+                ("@lookup_key_id", request.LookupKeyId),
+                ("@placement_epoch", request.PlacementEpoch),
+                ("@delete_epoch", request.DeleteEpoch),
+                ("@now_ms", ToUnixMs(request.RequestedAt))).ConfigureAwait(false);
+
+            await ExecuteAsync(
+                db,
+                transaction,
+                """
+                INSERT INTO object_versions (
+                    version_id,
+                    object_id,
+                    version_no,
+                    state,
+                    content_hash,
+                    size_bytes,
+                    encryption_alg,
+                    data_key_id,
+                    placement_epoch,
+                    delete_epoch,
+                    required_replica_count,
+                    created_at_ms,
+                    updated_at_ms
+                )
+                VALUES (
+                    @version_id,
+                    @object_id,
+                    @version_no,
+                    'writing',
+                    @content_hash,
+                    @size_bytes,
+                    @encryption_alg,
+                    @data_key_id,
+                    @placement_epoch,
+                    @delete_epoch,
+                    @required_replica_count,
+                    @now_ms,
+                    @now_ms
+                );
+                """,
+                cancellationToken,
+                ("@version_id", request.VersionId),
+                ("@object_id", request.ObjectId),
+                ("@version_no", request.VersionNo),
+                ("@content_hash", request.ContentHash),
+                ("@size_bytes", request.SizeBytes),
+                ("@encryption_alg", request.EncryptionAlg),
+                ("@data_key_id", request.DataKeyId),
+                ("@placement_epoch", request.PlacementEpoch),
+                ("@delete_epoch", request.DeleteEpoch),
+                ("@required_replica_count", request.RequiredReplicaCount),
+                ("@now_ms", ToUnixMs(request.RequestedAt))).ConfigureAwait(false);
+
+            var expiresAtMs = ToUnixMs(request.RequestedAt.Add(request.ReservationTtl));
+            foreach (var replica in request.Replicas)
+            {
+                await ExecuteAsync(
+                    db,
+                    transaction,
+                    """
+                    INSERT INTO replicas (
+                        replica_id,
+                        version_id,
+                        node_id,
+                        state,
+                        placement_epoch,
+                        delete_epoch,
+                        fencing_token,
+                        created_at_ms,
+                        updated_at_ms
+                    )
+                    VALUES (
+                        @replica_id,
+                        @version_id,
+                        @node_id,
+                        'planned',
+                        @placement_epoch,
+                        @delete_epoch,
+                        @fencing_token,
+                        @now_ms,
+                        @now_ms
+                    );
+                    """,
+                    cancellationToken,
+                    ("@replica_id", replica.ReplicaId),
+                    ("@version_id", request.VersionId),
+                    ("@node_id", replica.NodeId),
+                    ("@placement_epoch", request.PlacementEpoch),
+                    ("@delete_epoch", request.DeleteEpoch),
+                    ("@fencing_token", replica.FencingToken),
+                    ("@now_ms", ToUnixMs(request.RequestedAt))).ConfigureAwait(false);
+
+                await ExecuteAsync(
+                    db,
+                    transaction,
+                    """
+                    INSERT INTO capacity_reservations (
+                        reservation_id,
+                        tenant_id,
+                        dataset_id,
+                        object_id,
+                        version_id,
+                        replica_id,
+                        node_id,
+                        reservation_class,
+                        state,
+                        bytes_reserved,
+                        placement_epoch,
+                        delete_epoch,
+                        fencing_token,
+                        created_at_ms,
+                        expires_at_ms
+                    )
+                    VALUES (
+                        @reservation_id,
+                        @tenant_id,
+                        @dataset_id,
+                        @object_id,
+                        @version_id,
+                        @replica_id,
+                        @node_id,
+                        'write',
+                        'reserved',
+                        @bytes_reserved,
+                        @placement_epoch,
+                        @delete_epoch,
+                        @fencing_token,
+                        @now_ms,
+                        @expires_at_ms
+                    );
+                    """,
+                    cancellationToken,
+                    ("@reservation_id", replica.ReservationId),
+                    ("@tenant_id", request.TenantId),
+                    ("@dataset_id", request.DatasetId),
+                    ("@object_id", request.ObjectId),
+                    ("@version_id", request.VersionId),
+                    ("@replica_id", replica.ReplicaId),
+                    ("@node_id", replica.NodeId),
+                    ("@bytes_reserved", replica.BytesReserved),
+                    ("@placement_epoch", request.PlacementEpoch),
+                    ("@delete_epoch", request.DeleteEpoch),
+                    ("@fencing_token", replica.FencingToken),
+                    ("@now_ms", ToUnixMs(request.RequestedAt)),
+                    ("@expires_at_ms", expiresAtMs)).ConfigureAwait(false);
+            }
+
+            await AppendAuditAsync(
+                db,
+                transaction,
+                MetadataWorkflowNames.CreateWriteIntent,
+                "allowed",
+                request.ActorId,
+                objectId: request.ObjectId,
+                versionId: request.VersionId,
+                request.IdempotencyKey,
+                request.RequestedAt,
+                cancellationToken).ConfigureAwait(false);
+
+            await CompleteIdempotencyAsync(db, transaction, request.IdempotencyKey, request.RequestedAt, cancellationToken)
+                .ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return new SqliteWorkflowResult(MetadataWorkflowNames.CreateWriteIntent, "writing", Replayed: false, []);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    public async Task<SqliteWorkflowResult> CompleteReplicaAsync(
+        IDbConnection connection,
+        SqliteCompleteReplicaRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateCompleteReplica(request);
+        var db = RequireDbConnection(connection);
+        await EnsureOpenAsync(db, cancellationToken).ConfigureAwait(false);
+        await using var transaction = await db.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            var replay = await TryBeginIdempotencyAsync(
+                db,
+                transaction,
+                request.IdempotencyKey,
+                request.TenantId,
+                request.DatasetId,
+                MetadataWorkflowNames.CompleteReplica,
+                actorId: null,
+                request,
+                request.CompletedAt,
+                cancellationToken).ConfigureAwait(false);
+
+            if (replay)
+            {
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                return new SqliteWorkflowResult(MetadataWorkflowNames.CompleteReplica, "replayed", Replayed: true, []);
+            }
+
+            var rows = await ExecuteAsync(
+                db,
+                transaction,
+                """
+                UPDATE replicas
+                SET state = 'healthy',
+                    byte_count = @stored_bytes,
+                    hash_confirmed = 1,
+                    last_verified_at_ms = @completed_at_ms,
+                    updated_at_ms = @completed_at_ms
+                WHERE replica_id = @replica_id
+                  AND version_id = @version_id
+                  AND node_id = @node_id
+                  AND fencing_token = @fencing_token
+                  AND placement_epoch = @placement_epoch
+                  AND delete_epoch = @delete_epoch
+                  AND state IN ('planned', 'streaming', 'verifying')
+                  AND EXISTS (
+                      SELECT 1
+                      FROM object_versions
+                      WHERE object_versions.version_id = replicas.version_id
+                        AND object_versions.content_hash = @content_hash
+                        AND object_versions.size_bytes = @stored_bytes
+                  );
+                """,
+                cancellationToken,
+                ("@replica_id", request.ReplicaId),
+                ("@version_id", request.VersionId),
+                ("@node_id", request.NodeId),
+                ("@fencing_token", request.FencingToken),
+                ("@placement_epoch", request.PlacementEpoch),
+                ("@delete_epoch", request.DeleteEpoch),
+                ("@content_hash", request.ContentHash),
+                ("@stored_bytes", request.StoredBytes),
+                ("@completed_at_ms", ToUnixMs(request.CompletedAt))).ConfigureAwait(false);
+
+            if (rows != 1)
+            {
+                throw new InvalidOperationException("Replica completion did not match an active planned replica with the supplied fencing token and epochs.");
+            }
+
+            await ExecuteAsync(
+                db,
+                transaction,
+                """
+                UPDATE capacity_reservations
+                SET state = 'finalizing',
+                    committed_at_ms = @completed_at_ms
+                WHERE replica_id = @replica_id
+                  AND version_id = @version_id
+                  AND node_id = @node_id
+                  AND fencing_token = @fencing_token
+                  AND placement_epoch = @placement_epoch
+                  AND delete_epoch = @delete_epoch
+                  AND state IN ('reserved', 'streaming', 'finalizing');
+                """,
+                cancellationToken,
+                ("@replica_id", request.ReplicaId),
+                ("@version_id", request.VersionId),
+                ("@node_id", request.NodeId),
+                ("@fencing_token", request.FencingToken),
+                ("@placement_epoch", request.PlacementEpoch),
+                ("@delete_epoch", request.DeleteEpoch),
+                ("@completed_at_ms", ToUnixMs(request.CompletedAt))).ConfigureAwait(false);
+
+            await AppendAuditAsync(
+                db,
+                transaction,
+                MetadataWorkflowNames.CompleteReplica,
+                "allowed",
+                actorId: null,
+                objectId: request.ObjectId,
+                versionId: request.VersionId,
+                request.IdempotencyKey,
+                request.CompletedAt,
+                cancellationToken).ConfigureAwait(false);
+
+            await CompleteIdempotencyAsync(db, transaction, request.IdempotencyKey, request.CompletedAt, cancellationToken)
+                .ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return new SqliteWorkflowResult(MetadataWorkflowNames.CompleteReplica, "healthy", Replayed: false, []);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    public async Task<SqliteWorkflowResult> CommitVersionAsync(
+        IDbConnection connection,
+        SqliteCommitVersionRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateCommitVersion(request);
+        var db = RequireDbConnection(connection);
+        await EnsureOpenAsync(db, cancellationToken).ConfigureAwait(false);
+        await using var transaction = await db.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            var replay = await TryBeginIdempotencyAsync(
+                db,
+                transaction,
+                request.IdempotencyKey,
+                request.TenantId,
+                request.DatasetId,
+                MetadataWorkflowNames.CommitVersion,
+                request.ActorId,
+                request,
+                request.CommittedAt,
+                cancellationToken).ConfigureAwait(false);
+
+            if (replay)
+            {
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                return new SqliteWorkflowResult(MetadataWorkflowNames.CommitVersion, "replayed", Replayed: true, []);
+            }
+
+            var requiredReplicas = await ScalarLongAsync(
+                db,
+                transaction,
+                "SELECT required_replica_count FROM object_versions WHERE version_id = @version_id AND object_id = @object_id AND state = 'writing';",
+                cancellationToken,
+                ("@version_id", request.VersionId),
+                ("@object_id", request.ObjectId)).ConfigureAwait(false);
+            if (requiredReplicas is null)
+            {
+                throw new InvalidOperationException("Writable object version was not found.");
+            }
+
+            var healthyReplicas = await ScalarLongAsync(
+                db,
+                transaction,
+                "SELECT COUNT(*) FROM replicas WHERE version_id = @version_id AND state = 'healthy';",
+                cancellationToken,
+                ("@version_id", request.VersionId)).ConfigureAwait(false);
+            if (healthyReplicas < requiredReplicas)
+            {
+                throw new InvalidOperationException($"Version requires {requiredReplicas} healthy replicas but has {healthyReplicas}.");
+            }
+
+            await ExecuteAsync(
+                db,
+                transaction,
+                """
+                UPDATE object_versions
+                SET state = 'committed',
+                    committed_at_ms = @committed_at_ms,
+                    updated_at_ms = @committed_at_ms
+                WHERE version_id = @version_id
+                  AND object_id = @object_id
+                  AND state = 'writing';
+                """,
+                cancellationToken,
+                ("@version_id", request.VersionId),
+                ("@object_id", request.ObjectId),
+                ("@committed_at_ms", ToUnixMs(request.CommittedAt))).ConfigureAwait(false);
+
+            await ExecuteAsync(
+                db,
+                transaction,
+                """
+                UPDATE objects
+                SET current_version_id = @version_id,
+                    state = 'active',
+                    updated_at_ms = @committed_at_ms
+                WHERE object_id = @object_id
+                  AND tenant_id = @tenant_id
+                  AND dataset_id = @dataset_id;
+                """,
+                cancellationToken,
+                ("@version_id", request.VersionId),
+                ("@object_id", request.ObjectId),
+                ("@tenant_id", request.TenantId),
+                ("@dataset_id", request.DatasetId),
+                ("@committed_at_ms", ToUnixMs(request.CommittedAt))).ConfigureAwait(false);
+
+            await ExecuteAsync(
+                db,
+                transaction,
+                """
+                UPDATE capacity_reservations
+                SET state = 'committed',
+                    committed_at_ms = @committed_at_ms
+                WHERE version_id = @version_id
+                  AND state IN ('reserved', 'streaming', 'finalizing');
+                """,
+                cancellationToken,
+                ("@version_id", request.VersionId),
+                ("@committed_at_ms", ToUnixMs(request.CommittedAt))).ConfigureAwait(false);
+
+            await AppendAuditAsync(
+                db,
+                transaction,
+                MetadataWorkflowNames.CommitVersion,
+                "allowed",
+                request.ActorId,
+                request.ObjectId,
+                request.VersionId,
+                request.IdempotencyKey,
+                request.CommittedAt,
+                cancellationToken).ConfigureAwait(false);
+
+            await CompleteIdempotencyAsync(db, transaction, request.IdempotencyKey, request.CommittedAt, cancellationToken)
+                .ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return new SqliteWorkflowResult(MetadataWorkflowNames.CommitVersion, "committed", Replayed: false, ["object.version_committed"]);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    public async Task<SqliteWorkflowResult> CreateDeleteMarkerAsync(
+        IDbConnection connection,
+        SqliteCreateDeleteMarkerRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateDeleteMarker(request);
+        var db = RequireDbConnection(connection);
+        await EnsureOpenAsync(db, cancellationToken).ConfigureAwait(false);
+        await using var transaction = await db.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            var replay = await TryBeginIdempotencyAsync(
+                db,
+                transaction,
+                request.IdempotencyKey,
+                request.TenantId,
+                request.DatasetId,
+                MetadataWorkflowNames.DeleteMarker,
+                request.ActorId,
+                request,
+                request.CreatedAt,
+                cancellationToken).ConfigureAwait(false);
+
+            if (replay)
+            {
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                return new SqliteWorkflowResult(MetadataWorkflowNames.DeleteMarker, "replayed", Replayed: true, []);
+            }
+
+            await ExecuteAsync(
+                db,
+                transaction,
+                """
+                INSERT INTO objects (
+                    object_id,
+                    tenant_id,
+                    dataset_id,
+                    object_lookup_hash,
+                    lookup_key_id,
+                    current_version_id,
+                    state,
+                    placement_epoch,
+                    delete_epoch,
+                    created_at_ms,
+                    updated_at_ms
+                )
+                VALUES (
+                    @object_id,
+                    @tenant_id,
+                    @dataset_id,
+                    @object_lookup_hash,
+                    @lookup_key_id,
+                    NULL,
+                    'active',
+                    @placement_epoch,
+                    @delete_epoch,
+                    @now_ms,
+                    @now_ms
+                )
+                ON CONFLICT (object_id) DO UPDATE SET
+                    updated_at_ms = excluded.updated_at_ms;
+                """,
+                cancellationToken,
+                ("@object_id", request.ObjectId),
+                ("@tenant_id", request.TenantId),
+                ("@dataset_id", request.DatasetId),
+                ("@object_lookup_hash", request.ObjectLookupHash),
+                ("@lookup_key_id", request.LookupKeyId),
+                ("@placement_epoch", request.PlacementEpoch),
+                ("@delete_epoch", request.DeleteEpoch),
+                ("@now_ms", ToUnixMs(request.CreatedAt))).ConfigureAwait(false);
+
+            await ExecuteAsync(
+                db,
+                transaction,
+                """
+                INSERT INTO object_versions (
+                    version_id,
+                    object_id,
+                    version_no,
+                    state,
+                    encryption_alg,
+                    data_key_id,
+                    placement_epoch,
+                    delete_epoch,
+                    required_replica_count,
+                    created_at_ms,
+                    updated_at_ms
+                )
+                VALUES (
+                    @version_id,
+                    @object_id,
+                    @version_no,
+                    'delete_marker',
+                    'none',
+                    'none',
+                    @placement_epoch,
+                    @delete_epoch,
+                    1,
+                    @now_ms,
+                    @now_ms
+                );
+                """,
+                cancellationToken,
+                ("@version_id", request.DeleteMarkerVersionId),
+                ("@object_id", request.ObjectId),
+                ("@version_no", request.VersionNo),
+                ("@placement_epoch", request.PlacementEpoch),
+                ("@delete_epoch", request.DeleteEpoch),
+                ("@now_ms", ToUnixMs(request.CreatedAt))).ConfigureAwait(false);
+
+            await ExecuteAsync(
+                db,
+                transaction,
+                """
+                UPDATE objects
+                SET current_version_id = @version_id,
+                    state = 'delete_marker',
+                    delete_epoch = @delete_epoch,
+                    updated_at_ms = @now_ms
+                WHERE object_id = @object_id
+                  AND tenant_id = @tenant_id
+                  AND dataset_id = @dataset_id;
+                """,
+                cancellationToken,
+                ("@version_id", request.DeleteMarkerVersionId),
+                ("@delete_epoch", request.DeleteEpoch),
+                ("@now_ms", ToUnixMs(request.CreatedAt)),
+                ("@object_id", request.ObjectId),
+                ("@tenant_id", request.TenantId),
+                ("@dataset_id", request.DatasetId)).ConfigureAwait(false);
+
+            await ExecuteAsync(
+                db,
+                transaction,
+                """
+                INSERT INTO tombstones (
+                    tombstone_id,
+                    object_id,
+                    version_id,
+                    delete_epoch,
+                    reason,
+                    retain_until_ms,
+                    created_at_ms
+                )
+                VALUES (
+                    @tombstone_id,
+                    @object_id,
+                    @version_id,
+                    @delete_epoch,
+                    'delete_marker',
+                    @retain_until_ms,
+                    @now_ms
+                );
+                """,
+                cancellationToken,
+                ("@tombstone_id", $"tombstone-{request.DeleteMarkerVersionId}"),
+                ("@object_id", request.ObjectId),
+                ("@version_id", request.DeleteMarkerVersionId),
+                ("@delete_epoch", request.DeleteEpoch),
+                ("@retain_until_ms", ToUnixMs(request.CreatedAt.AddDays(30))),
+                ("@now_ms", ToUnixMs(request.CreatedAt))).ConfigureAwait(false);
+
+            await AppendAuditAsync(
+                db,
+                transaction,
+                MetadataWorkflowNames.DeleteMarker,
+                "allowed",
+                request.ActorId,
+                request.ObjectId,
+                request.DeleteMarkerVersionId,
+                request.IdempotencyKey,
+                request.CreatedAt,
+                cancellationToken).ConfigureAwait(false);
+
+            await CompleteIdempotencyAsync(db, transaction, request.IdempotencyKey, request.CreatedAt, cancellationToken)
+                .ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return new SqliteWorkflowResult(MetadataWorkflowNames.DeleteMarker, "delete_marker", Replayed: false, ["object.delete_marker"]);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    private static async Task<bool> TryBeginIdempotencyAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        string idempotencyKey,
+        string? tenantId,
+        string? datasetId,
+        string workflow,
+        string? actorId,
+        object request,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var existing = await ScalarStringAsync(
+            connection,
+            transaction,
+            "SELECT result_state FROM idempotency_records WHERE idempotency_key = @idempotency_key;",
+            cancellationToken,
+            ("@idempotency_key", idempotencyKey)).ConfigureAwait(false);
+        if (existing is not null)
+        {
+            return existing == "completed";
+        }
+
+        await ExecuteAsync(
+            connection,
+            transaction,
+            """
+            INSERT INTO idempotency_records (
+                idempotency_key,
+                tenant_id,
+                dataset_id,
+                workflow,
+                actor_id,
+                request_hash,
+                result_state,
+                created_at_ms
+            )
+            VALUES (
+                @idempotency_key,
+                @tenant_id,
+                @dataset_id,
+                @workflow,
+                @actor_id,
+                @request_hash,
+                'started',
+                @created_at_ms
+            );
+            """,
+            cancellationToken,
+            ("@idempotency_key", idempotencyKey),
+            ("@tenant_id", tenantId),
+            ("@dataset_id", datasetId),
+            ("@workflow", workflow),
+            ("@actor_id", actorId),
+            ("@request_hash", HashRequest(request)),
+            ("@created_at_ms", ToUnixMs(now))).ConfigureAwait(false);
+
+        return false;
+    }
+
+    private static Task CompleteIdempotencyAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        string idempotencyKey,
+        DateTimeOffset now,
+        CancellationToken cancellationToken) =>
+        ExecuteAsync(
+            connection,
+            transaction,
+            """
+            UPDATE idempotency_records
+            SET result_state = 'completed',
+                completed_at_ms = @completed_at_ms
+            WHERE idempotency_key = @idempotency_key;
+            """,
+            cancellationToken,
+            ("@idempotency_key", idempotencyKey),
+            ("@completed_at_ms", ToUnixMs(now)));
+
+    private static Task AppendAuditAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        string workflow,
+        string decision,
+        string? actorId,
+        string objectId,
+        string versionId,
+        string idempotencyKey,
+        DateTimeOffset occurredAt,
+        CancellationToken cancellationToken) =>
+        ExecuteAsync(
+            connection,
+            transaction,
+            """
+            INSERT INTO audit_events (
+                workflow,
+                decision,
+                actor_id,
+                object_id,
+                version_id,
+                idempotency_key,
+                occurred_at_ms
+            )
+            VALUES (
+                @workflow,
+                @decision,
+                @actor_id,
+                @object_id,
+                @version_id,
+                @idempotency_key,
+                @occurred_at_ms
+            );
+            """,
+            cancellationToken,
+            ("@workflow", workflow),
+            ("@decision", decision),
+            ("@actor_id", actorId),
+            ("@object_id", objectId),
+            ("@version_id", versionId),
+            ("@idempotency_key", idempotencyKey),
+            ("@occurred_at_ms", ToUnixMs(occurredAt)));
+
+    private static async Task<int> ExecuteAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        string sql,
+        CancellationToken cancellationToken,
+        params (string Name, object? Value)[] parameters)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = sql;
+        AddParameters(command, parameters);
+        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<long?> ScalarLongAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        string sql,
+        CancellationToken cancellationToken,
+        params (string Name, object? Value)[] parameters)
+    {
+        var value = await ScalarAsync(connection, transaction, sql, cancellationToken, parameters).ConfigureAwait(false);
+        return value is null or DBNull ? null : Convert.ToInt64(value);
+    }
+
+    private static async Task<string?> ScalarStringAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        string sql,
+        CancellationToken cancellationToken,
+        params (string Name, object? Value)[] parameters)
+    {
+        var value = await ScalarAsync(connection, transaction, sql, cancellationToken, parameters).ConfigureAwait(false);
+        return value is null or DBNull ? null : Convert.ToString(value);
+    }
+
+    private static async Task<object?> ScalarAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        string sql,
+        CancellationToken cancellationToken,
+        params (string Name, object? Value)[] parameters)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = sql;
+        AddParameters(command, parameters);
+        return await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static void AddParameters(DbCommand command, params (string Name, object? Value)[] parameters)
+    {
+        foreach (var (name, value) in parameters)
+        {
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = name;
+            parameter.Value = value ?? DBNull.Value;
+            command.Parameters.Add(parameter);
+        }
+    }
+
+    private static DbConnection RequireDbConnection(IDbConnection connection) =>
+        connection as DbConnection
+        ?? throw new ArgumentException("Workflow store requires a DbConnection.", nameof(connection));
+
+    private static async Task EnsureOpenAsync(DbConnection connection, CancellationToken cancellationToken)
+    {
+        if (connection.State != ConnectionState.Open)
+        {
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private static long ToUnixMs(DateTimeOffset value) => value.ToUnixTimeMilliseconds();
+
+    private static byte[] HashRequest(object request) =>
+        SHA256.HashData(Encoding.UTF8.GetBytes(request.ToString() ?? string.Empty));
+
+    private static void ValidateCreateWriteIntent(SqliteCreateWriteIntentRequest request)
+    {
+        RequireText(request.TenantId, nameof(request.TenantId));
+        RequireText(request.DatasetId, nameof(request.DatasetId));
+        RequireText(request.ObjectId, nameof(request.ObjectId));
+        RequireBytes(request.ObjectLookupHash, nameof(request.ObjectLookupHash));
+        RequireText(request.LookupKeyId, nameof(request.LookupKeyId));
+        RequireText(request.VersionId, nameof(request.VersionId));
+        RequireText(request.ActorId, nameof(request.ActorId));
+        RequireBytes(request.ContentHash, nameof(request.ContentHash));
+        RequirePositive(request.SizeBytes, nameof(request.SizeBytes));
+        RequireText(request.EncryptionAlg, nameof(request.EncryptionAlg));
+        RequireText(request.DataKeyId, nameof(request.DataKeyId));
+        RequirePositive(request.RequiredReplicaCount, nameof(request.RequiredReplicaCount));
+        RequirePositive(request.PlacementEpoch, nameof(request.PlacementEpoch));
+        RequireNonNegative(request.DeleteEpoch, nameof(request.DeleteEpoch));
+        RequirePositive(request.ReservationTtl, nameof(request.ReservationTtl));
+        RequireText(request.IdempotencyKey, nameof(request.IdempotencyKey));
+        if (request.Replicas.Count < request.RequiredReplicaCount)
+        {
+            throw new ArgumentException("At least required replica count reservations must be supplied.", nameof(request));
+        }
+    }
+
+    private static void ValidateCompleteReplica(SqliteCompleteReplicaRequest request)
+    {
+        RequireText(request.TenantId, nameof(request.TenantId));
+        RequireText(request.DatasetId, nameof(request.DatasetId));
+        RequireText(request.ObjectId, nameof(request.ObjectId));
+        RequireText(request.VersionId, nameof(request.VersionId));
+        RequireText(request.ReplicaId, nameof(request.ReplicaId));
+        RequireText(request.NodeId, nameof(request.NodeId));
+        RequireBytes(request.ContentHash, nameof(request.ContentHash));
+        RequirePositive(request.StoredBytes, nameof(request.StoredBytes));
+        RequireNonNegative(request.FencingToken, nameof(request.FencingToken));
+        RequirePositive(request.PlacementEpoch, nameof(request.PlacementEpoch));
+        RequireNonNegative(request.DeleteEpoch, nameof(request.DeleteEpoch));
+        RequireText(request.IdempotencyKey, nameof(request.IdempotencyKey));
+    }
+
+    private static void ValidateCommitVersion(SqliteCommitVersionRequest request)
+    {
+        RequireText(request.TenantId, nameof(request.TenantId));
+        RequireText(request.DatasetId, nameof(request.DatasetId));
+        RequireText(request.ObjectId, nameof(request.ObjectId));
+        RequireText(request.VersionId, nameof(request.VersionId));
+        RequireText(request.ActorId, nameof(request.ActorId));
+        RequireText(request.IdempotencyKey, nameof(request.IdempotencyKey));
+    }
+
+    private static void ValidateDeleteMarker(SqliteCreateDeleteMarkerRequest request)
+    {
+        RequireText(request.TenantId, nameof(request.TenantId));
+        RequireText(request.DatasetId, nameof(request.DatasetId));
+        RequireText(request.ObjectId, nameof(request.ObjectId));
+        RequireBytes(request.ObjectLookupHash, nameof(request.ObjectLookupHash));
+        RequireText(request.LookupKeyId, nameof(request.LookupKeyId));
+        RequireText(request.DeleteMarkerVersionId, nameof(request.DeleteMarkerVersionId));
+        RequireText(request.ActorId, nameof(request.ActorId));
+        RequirePositive(request.PlacementEpoch, nameof(request.PlacementEpoch));
+        RequireNonNegative(request.DeleteEpoch, nameof(request.DeleteEpoch));
+        RequireText(request.IdempotencyKey, nameof(request.IdempotencyKey));
+    }
+
+    private static void RequireText(string value, string name)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new ArgumentException($"{name} is required.", name);
+        }
+    }
+
+    private static void RequireBytes(byte[] value, string name)
+    {
+        if (value.Length == 0)
+        {
+            throw new ArgumentException($"{name} is required.", name);
+        }
+    }
+
+    private static void RequirePositive(long value, string name)
+    {
+        if (value <= 0)
+        {
+            throw new ArgumentOutOfRangeException(name, value, $"{name} must be positive.");
+        }
+    }
+
+    private static void RequirePositive(TimeSpan value, string name)
+    {
+        if (value <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(name, value, $"{name} must be positive.");
+        }
+    }
+
+    private static void RequireNonNegative(long value, string name)
+    {
+        if (value < 0)
+        {
+            throw new ArgumentOutOfRangeException(name, value, $"{name} must be non-negative.");
+        }
+    }
+}

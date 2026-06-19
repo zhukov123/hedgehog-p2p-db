@@ -70,10 +70,10 @@ Admin is not a later dashboard. For v1, admin status, repair visibility, audit r
   - [x] capacity reservations
 - [x] Add migration runner.
 - [ ] Add metadata workflow methods:
-  - [ ] create write intent
-  - [ ] complete replica
-  - [ ] commit version
-  - [ ] delete marker
+  - [x] create write intent
+  - [x] complete replica
+  - [x] commit version
+  - [x] delete marker
   - [ ] lease repair
   - [ ] expire reservation
   - [ ] cleanup conversion
@@ -131,7 +131,8 @@ Admin is not a later dashboard. For v1, admin status, repair visibility, audit r
 
 - [ ] Add unit tests for labels, transitions, and envelope vectors.
 - [x] Add SQLite migration integration tests.
-- [ ] Add SQLite integration tests for every workflow.
+- [x] Add SQLite integration tests for create write intent, complete replica, commit version, and delete marker.
+- [ ] Add SQLite integration tests for remaining workflows.
 - [ ] Add storage-agent crash tests.
 - [x] Add admin repository contract tests.
 - [x] Add admin endpoint contract tests.
