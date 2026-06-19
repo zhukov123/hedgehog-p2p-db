@@ -66,3 +66,28 @@ verified_retrievals=2
 delete_verified=True
 healthy_replica_rows=6
 ```
+
+## Curlable Local Runtime API
+
+Start a fresh local runtime API:
+
+```text
+HEDGEHOG_RUNTIME_ROOT="$(pwd)/.hedgehog/curl-runtime" HEDGEHOG_RUNTIME_RESET=true \
+  dotnet run --project src/Hedgehog.LocalRuntime.Api --urls http://localhost:5090
+```
+
+Create tenants and write/read/delete objects:
+
+```text
+curl -fsS -X POST http://localhost:5090/runtime/tenants \
+  -H 'content-type: application/json' \
+  -d '{"tenantId":"tenant-alpha","datasetId":"dataset-docs"}'
+
+curl -fsS -X POST http://localhost:5090/runtime/tenants/tenant-alpha/datasets/dataset-docs/objects \
+  -H 'content-type: application/json' \
+  -d '{"clientId":"alpha-writer","name":"alpha-report.txt","text":"hello alpha","preferLastHead":false}'
+
+curl -fsS 'http://localhost:5090/runtime/tenants/tenant-alpha/datasets/dataset-docs/objects?clientId=alpha-reader&name=alpha-report.txt&preferLastHead=true'
+
+curl -fsS -X DELETE 'http://localhost:5090/runtime/tenants/tenant-alpha/datasets/dataset-docs/objects?clientId=alpha-deleter&name=alpha-report.txt'
+```

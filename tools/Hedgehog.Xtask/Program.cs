@@ -239,6 +239,7 @@ internal sealed class ScaffoldContractValidator(string root, bool allowMissingSc
         new("Hedgehog.Repair", "src/Hedgehog.Repair/Hedgehog.Repair.csproj", false),
         new("Hedgehog.Client", "src/Hedgehog.Client/Hedgehog.Client.csproj", true),
         new("Hedgehog.LocalRuntime", "src/Hedgehog.LocalRuntime/Hedgehog.LocalRuntime.csproj", true),
+        new("Hedgehog.LocalRuntime.Api", "src/Hedgehog.LocalRuntime.Api/Hedgehog.LocalRuntime.Api.csproj", true),
         new("Hedgehog.Metadata.Core.Tests", "tests/Hedgehog.Metadata.Core.Tests/Hedgehog.Metadata.Core.Tests.csproj", true),
         new("Hedgehog.Metadata.Sqlite.Tests", "tests/Hedgehog.Metadata.Sqlite.Tests/Hedgehog.Metadata.Sqlite.Tests.csproj", true),
         new("Hedgehog.Admin.Api.Tests", "tests/Hedgehog.Admin.Api.Tests/Hedgehog.Admin.Api.Tests.csproj", true),

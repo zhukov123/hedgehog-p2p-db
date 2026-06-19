@@ -43,6 +43,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Hedgehog.LocalRuntime", "sr
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Hedgehog.LocalRuntime.Tests", "tests\Hedgehog.LocalRuntime.Tests\Hedgehog.LocalRuntime.Tests.csproj", "{234B2FE6-E71F-4FE7-922F-66509CCE9FA4}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Hedgehog.LocalRuntime.Api", "src\Hedgehog.LocalRuntime.Api\Hedgehog.LocalRuntime.Api.csproj", "{E693A5A0-F81A-4352-8612-919DFCF4B17A}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -120,6 +122,10 @@ Global
 		{234B2FE6-E71F-4FE7-922F-66509CCE9FA4}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{234B2FE6-E71F-4FE7-922F-66509CCE9FA4}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{234B2FE6-E71F-4FE7-922F-66509CCE9FA4}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E693A5A0-F81A-4352-8612-919DFCF4B17A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E693A5A0-F81A-4352-8612-919DFCF4B17A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E693A5A0-F81A-4352-8612-919DFCF4B17A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E693A5A0-F81A-4352-8612-919DFCF4B17A}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{67EA704A-3D7B-4636-8089-454A1773EA9F} = {431CC250-C704-427F-88AC-D1CAEBC21285}
@@ -139,5 +145,6 @@ Global
 		{E531940E-E507-4E2F-866F-0C488E037221} = {431CC250-C704-427F-88AC-D1CAEBC21285}
 		{795870C0-9B05-4B6E-85B0-00DBBD39341F} = {431CC250-C704-427F-88AC-D1CAEBC21285}
 		{234B2FE6-E71F-4FE7-922F-66509CCE9FA4} = {BB384106-04BA-44B1-9641-8AD0EA5A8064}
+		{E693A5A0-F81A-4352-8612-919DFCF4B17A} = {431CC250-C704-427F-88AC-D1CAEBC21285}
 	EndGlobalSection
 EndGlobal

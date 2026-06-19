@@ -35,14 +35,32 @@ public sealed record LocalClusterOptions(
 public sealed record LocalClusterSnapshot(
     string RuntimeRoot,
     string MetadataPath,
+    IReadOnlyList<LocalTenantSnapshot> Tenants,
     IReadOnlyList<HeadNodeSnapshot> Heads,
     IReadOnlyList<StorageAgentSnapshot> StorageNodes);
+
+public sealed record LocalTenantSnapshot(
+    string TenantId,
+    string DatasetId,
+    int HeadCount,
+    int RequiredReplicaCount);
+
+public sealed record LocalTenantRegistration(
+    string TenantId,
+    string DatasetId,
+    byte[] DatasetLookupKey,
+    byte[] DatasetDataKey,
+    int RequiredReplicaCount);
+
+internal sealed record LocalTenantRuntime(
+    LocalTenantRegistration Registration,
+    IReadOnlyList<LocalHeadNode> Heads);
 
 public sealed class LocalCluster : IAsyncDisposable
 {
     private readonly LocalClusterOptions options;
     private readonly List<FileStorageAgent> storageNodes = [];
-    private readonly List<LocalHeadNode> heads = [];
+    private readonly Dictionary<string, LocalTenantRuntime> tenants = new(StringComparer.Ordinal);
     private readonly List<SqliteConnection> headConnections = [];
     private bool started;
 
@@ -74,7 +92,7 @@ public sealed class LocalCluster : IAsyncDisposable
 
     public string MetadataPath => Path.Combine(RuntimeRoot, "metadata", "hedgehog.sqlite");
 
-    public IReadOnlyList<IHeadNode> Heads => heads;
+    public IReadOnlyList<IHeadNode> Heads => tenants.Values.SelectMany(tenant => tenant.Heads).Cast<IHeadNode>().ToArray();
 
     public IReadOnlyList<IStorageAgentNode> StorageNodes => storageNodes;
 
@@ -106,50 +124,128 @@ public sealed class LocalCluster : IAsyncDisposable
             storageNodes.Add(agent);
         }
 
-        for (var i = 0; i < options.HeadCount; i++)
-        {
-            var connection = new SqliteConnection(ConnectionString);
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-            headConnections.Add(connection);
-
-            var head = new LocalHeadNode(
-                new HeadNodeOptions(
-                    HeadId: $"head-{i + 1}",
-                    options.TenantId,
-                    options.DatasetId,
-                    ActorId: $"head-{i + 1}",
-                    LookupKeyId: "lookup-key-local",
-                    DataKeyId: "data-key-local",
-                    options.RequiredReplicaCount),
-                connection,
-                SqliteMetadataAuthority.CreateWorkflowStore(),
-                storageNodes);
-            await head.StartAsync(cancellationToken).ConfigureAwait(false);
-            heads.Add(head);
-        }
+        await AddTenantAsync(
+            options.TenantId,
+            options.DatasetId,
+            options.DatasetLookupKey,
+            options.DatasetDataKey,
+            options.RequiredReplicaCount,
+            cancellationToken).ConfigureAwait(false);
 
         started = true;
     }
 
     public HedgehogClient CreateClient(string clientId, bool preferLastHead = false)
     {
+        return CreateClientForTenant(options.TenantId, options.DatasetId, clientId, preferLastHead);
+    }
+
+    public HedgehogClient CreateClientForTenant(
+        string tenantId,
+        string datasetId,
+        string clientId,
+        bool preferLastHead = false)
+    {
         RequireStarted();
-        var orderedHeads = preferLastHead ? heads.AsEnumerable().Reverse().Cast<IHeadNode>().ToArray() : heads.Cast<IHeadNode>().ToArray();
+        var tenant = GetTenant(tenantId, datasetId);
+        var orderedHeads = preferLastHead
+            ? tenant.Heads.AsEnumerable().Reverse().Cast<IHeadNode>().ToArray()
+            : tenant.Heads.Cast<IHeadNode>().ToArray();
         return new HedgehogClient(
             new HedgehogClientOptions(
                 clientId,
-                options.TenantId,
-                options.DatasetId,
-                options.DatasetLookupKey,
-                options.DatasetDataKey),
+                tenant.Registration.TenantId,
+                tenant.Registration.DatasetId,
+                tenant.Registration.DatasetLookupKey,
+                tenant.Registration.DatasetDataKey),
             orderedHeads);
+    }
+
+    public async Task<LocalTenantRegistration> AddTenantAsync(
+        string tenantId,
+        string datasetId,
+        CancellationToken cancellationToken = default) =>
+        await AddTenantAsync(
+            tenantId,
+            datasetId,
+            RandomNumberGenerator.GetBytes(32),
+            RandomNumberGenerator.GetBytes(32),
+            options.RequiredReplicaCount,
+            cancellationToken).ConfigureAwait(false);
+
+    public async Task<LocalTenantRegistration> AddTenantAsync(
+        string tenantId,
+        string datasetId,
+        byte[] datasetLookupKey,
+        byte[] datasetDataKey,
+        int requiredReplicaCount,
+        CancellationToken cancellationToken = default)
+    {
+        if (storageNodes.Count == 0)
+        {
+            throw new InvalidOperationException("Storage nodes must be running before tenants can be added.");
+        }
+
+        if (requiredReplicaCount <= 0 || requiredReplicaCount > storageNodes.Count)
+        {
+            throw new ArgumentOutOfRangeException(nameof(requiredReplicaCount), "Required replica count must fit available storage nodes.");
+        }
+
+        if (datasetLookupKey.Length != 32)
+        {
+            throw new ArgumentException("Dataset lookup key must be exactly 32 bytes.", nameof(datasetLookupKey));
+        }
+
+        if (datasetDataKey.Length != 32)
+        {
+            throw new ArgumentException("Dataset data key must be exactly 32 bytes.", nameof(datasetDataKey));
+        }
+
+        var key = TenantKey(tenantId, datasetId);
+        if (tenants.TryGetValue(key, out var existing))
+        {
+            return existing.Registration;
+        }
+
+        var tenantHeads = new List<LocalHeadNode>();
+        for (var i = 0; i < options.HeadCount; i++)
+        {
+            var connection = new SqliteConnection(ConnectionString);
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            headConnections.Add(connection);
+
+            var headId = $"{tenantId}-{datasetId}-head-{i + 1}";
+            var head = new LocalHeadNode(
+                new HeadNodeOptions(
+                    HeadId: headId,
+                    tenantId,
+                    datasetId,
+                    ActorId: headId,
+                    LookupKeyId: $"lookup-key-{tenantId}-{datasetId}",
+                    DataKeyId: $"data-key-{tenantId}-{datasetId}",
+                    requiredReplicaCount),
+                connection,
+                SqliteMetadataAuthority.CreateWorkflowStore(),
+                storageNodes);
+            await head.StartAsync(cancellationToken).ConfigureAwait(false);
+            tenantHeads.Add(head);
+        }
+
+        var registration = new LocalTenantRegistration(
+            tenantId,
+            datasetId,
+            datasetLookupKey.ToArray(),
+            datasetDataKey.ToArray(),
+            requiredReplicaCount);
+        tenants.Add(key, new LocalTenantRuntime(registration, tenantHeads));
+        return registration;
     }
 
     public async Task<LocalClusterSnapshot> SnapshotAsync(CancellationToken cancellationToken = default)
     {
         RequireStarted();
         var headSnapshots = new List<HeadNodeSnapshot>();
-        foreach (var head in heads)
+        foreach (var head in tenants.Values.SelectMany(tenant => tenant.Heads))
         {
             headSnapshots.Add(await head.SnapshotAsync(cancellationToken).ConfigureAwait(false));
         }
@@ -160,7 +256,17 @@ public sealed class LocalCluster : IAsyncDisposable
             storageSnapshots.Add(await node.SnapshotAsync(cancellationToken).ConfigureAwait(false));
         }
 
-        return new LocalClusterSnapshot(RuntimeRoot, MetadataPath, headSnapshots, storageSnapshots);
+        var tenantSnapshots = tenants.Values
+            .Select(tenant => new LocalTenantSnapshot(
+                tenant.Registration.TenantId,
+                tenant.Registration.DatasetId,
+                tenant.Heads.Count,
+                tenant.Registration.RequiredReplicaCount))
+            .OrderBy(tenant => tenant.TenantId, StringComparer.Ordinal)
+            .ThenBy(tenant => tenant.DatasetId, StringComparer.Ordinal)
+            .ToArray();
+
+        return new LocalClusterSnapshot(RuntimeRoot, MetadataPath, tenantSnapshots, headSnapshots, storageSnapshots);
     }
 
     public async Task<long> ScalarLongAsync(
@@ -184,7 +290,7 @@ public sealed class LocalCluster : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        foreach (var head in heads)
+        foreach (var head in tenants.Values.SelectMany(tenant => tenant.Heads))
         {
             await head.StopAsync().ConfigureAwait(false);
         }
@@ -212,5 +318,25 @@ public sealed class LocalCluster : IAsyncDisposable
         {
             throw new InvalidOperationException("Local cluster is not running.");
         }
+    }
+
+    private LocalTenantRuntime GetTenant(string tenantId, string datasetId)
+    {
+        if (!tenants.TryGetValue(TenantKey(tenantId, datasetId), out var tenant))
+        {
+            throw new InvalidOperationException($"Tenant dataset '{tenantId}/{datasetId}' is not registered.");
+        }
+
+        return tenant;
+    }
+
+    private static string TenantKey(string tenantId, string datasetId)
+    {
+        if (string.IsNullOrWhiteSpace(tenantId) || string.IsNullOrWhiteSpace(datasetId))
+        {
+            throw new ArgumentException("Tenant and dataset ids are required.");
+        }
+
+        return $"{tenantId}/{datasetId}";
     }
 }

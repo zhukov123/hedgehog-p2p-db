@@ -21,6 +21,7 @@ This contract keeps the architecture understandable while the implementation is 
 | `Hedgehog.Repair` | `src/Hedgehog.Repair/Hedgehog.Repair.csproj` | planned | Repair scanner, lease worker, and repair job executor. |
 | `Hedgehog.Client` | `src/Hedgehog.Client/Hedgehog.Client.csproj` | required now | First client commands for put, get, delete, list-by-friendly-name, and inspect metadata. |
 | `Hedgehog.LocalRuntime` | `src/Hedgehog.LocalRuntime/Hedgehog.LocalRuntime.csproj` | required now | Local multi-head, multi-agent cluster generator and smoke scenario runner. |
+| `Hedgehog.LocalRuntime.Api` | `src/Hedgehog.LocalRuntime.Api/Hedgehog.LocalRuntime.Api.csproj` | required now | Curlable local runtime API for tenant registration, object writes, reads, deletes, and status. |
 
 ## Test Projects
 
