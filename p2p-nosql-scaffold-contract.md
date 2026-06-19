@@ -1,4 +1,4 @@
-﻿# P2P NoSQL Rust Scaffold Contract
+﻿# P2P NoSQL .NET Scaffold Contract
 
 ## Current Location
 

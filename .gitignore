@@ -6,3 +6,7 @@ SOUL.md
 TOOLS.md
 USER.md
 memory/
+bin/
+obj/
+.vs/
+TestResults/

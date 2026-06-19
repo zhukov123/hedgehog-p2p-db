@@ -2,7 +2,7 @@
 
 ## Slice
 
-This pass defines the v1 replication and repair state machine for the Rust-first head-mediated encrypted object store.
+This pass defines the v1 replication and repair state machine for the .NET-first head-mediated encrypted object store.
 
 Assumptions:
 - metadata store is the authoritative metadata plane.

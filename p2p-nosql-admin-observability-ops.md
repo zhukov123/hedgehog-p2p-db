@@ -336,8 +336,8 @@ Accepted findings:
 
 ## Next Unresolved Portion
 
-The next design slice should define implementation roadmap and Rust workspace sequencing:
-- crate-by-crate build order
+The next design slice should define implementation roadmap and .NET solution sequencing:
+- project-by-project build order
 - first migrations
 - test harnesses
 - minimal local cluster

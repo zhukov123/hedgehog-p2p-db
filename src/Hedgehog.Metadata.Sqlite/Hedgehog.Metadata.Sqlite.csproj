@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../Hedgehog.Metadata.Core/Hedgehog.Metadata.Core.csproj" />
+    <ProjectReference Include="../Hedgehog.Types/Hedgehog.Types.csproj" />
+  </ItemGroup>
+</Project>

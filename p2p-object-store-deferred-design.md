@@ -200,7 +200,7 @@ Reason:
 Decision to revisit when:
 - single-cluster authority, backup, restore, and revocation are mature
 
-### Rust-Native Raft Metadata
+### Custom Consensus-Backed Metadata
 
 Deferred from v1.
 

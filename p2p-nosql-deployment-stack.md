@@ -2,9 +2,9 @@
 
 ## Slice
 
-This pass defines the v1 deployment contract for the Rust-first, head-mediated encrypted object store.
+This pass defines the v1 deployment contract for the .NET-first, head-mediated encrypted object store.
 
-The deployment stack must be boring enough for local development, close enough to production to catch integration mistakes, and explicit about what is not yet a production topology. It is not the source of correctness. The metadata store, signed authority records, storage-agent durable state, and `metadata-core` transitions remain the authority.
+The deployment stack must be boring enough for local development, close enough to production to catch integration mistakes, and explicit about what is not yet a production topology. It is not the source of correctness. The metadata store, signed authority records, storage-agent durable state, and `Hedgehog.Metadata.Core` transitions remain the authority.
 
 ## Deployment Targets
 
@@ -85,7 +85,7 @@ Owns:
 Required configuration:
 - SQLite database path in the ignored runtime directory for local development
 - persistent metadata path for beta deployments
-- health check using a real SQL query through `hedgehog-metadata-sql`
+- health check using a real SQL query through `Hedgehog.Metadata.Sqlite`
 - migration runner dependency before heads start serving writes
 - backup/export hook in beta target
 
@@ -99,7 +99,7 @@ Must expose metrics through one of:
 Runs once per stack start before mutable services accept traffic.
 
 Rules:
-- use the same `sqlx` migration set as CI
+- use the same `Microsoft.Data.Sqlite` migration set as CI
 - fail the stack if migrations fail
 - record migration version in metadata store
 - never run destructive cleanup implicitly
@@ -214,7 +214,7 @@ admin-api:9100
 metadata-exporter:9187
 ```
 
-The exact port can change, but all Rust services should use one conventional metrics port in local runtime unless there is a strong reason not to.
+The exact port can change, but all .NET services should use one conventional metrics port in local runtime unless there is a strong reason not to.
 
 ### `grafana`
 
@@ -312,15 +312,15 @@ The first local cluster may generate a development admin key automatically. Beta
 ## Images and Binaries
 
 Recommended image split:
-- `hedgehog-head`
-- `hedgehog-storage-agent`
-- `hedgehog-repair`
-- `hedgehog-admin-api`
-- `hedgehog-admin-ui`
+- `Hedgehog.Head`
+- `Hedgehog.StorageAgent`
+- `Hedgehog.Repair`
+- `Hedgehog.Admin-api`
+- `Hedgehog.Admin-ui`
 - `hedgehog-cli`
 - `hedgehog-migrator`
 
-For early implementation, one Rust workspace image with multiple binary entrypoints is acceptable if:
+For early implementation, one .NET solution image with multiple binary entrypoints is acceptable if:
 - binary commands are explicit
 - image tags include git SHA and schema compatibility
 - runtime config chooses role without changing code
@@ -383,15 +383,15 @@ Each drill needs:
 
 ## Implementation Order
 
-1. Add `hedgehog-local-cluster` config generation before polished services exist.
+1. Add `Hedgehog.LocalCluster` config generation before polished services exist.
 2. Add SQLite metadata store plus migrator runtime skeleton.
-3. Add fake health/metrics endpoints for planned Rust binaries.
+3. Add fake health/metrics endpoints for planned .NET binaries.
 4. Add Prometheus scrape config and empty Grafana dashboards wired to canonical metric names.
 5. Add storage-agent persistent volumes and size limits.
 6. Add restart and kill drills once storage-agent journal code exists.
 7. Add restore/restore drill once real migrations and audit/outbox tables exist.
 
-This means local deployment work starts earlier than its crate position in the roadmap suggests. The harness can be thin at first, but it should exist while metadata transactions are being built.
+This means local deployment work starts earlier than its project position in the roadmap suggests. The harness can be thin at first, but it should exist while metadata transactions are being built.
 
 ## Decisions Locked
 
@@ -402,14 +402,14 @@ This means local deployment work starts earlier than its crate position in the r
 - OpenTelemetry collector is optional for v1 local development.
 - Storage agents keep outbound-only connectivity and persistent local volumes.
 - The migrator is a first-class service, not a manual side instruction.
-- Local-cluster generation belongs in the Rust workspace as a test harness, not only as static YAML.
+- Local-cluster generation belongs in the .NET solution as a test harness, not only as static YAML.
 
 ## Next Unresolved Portion
 
-Before implementation begins, write the v1 implementation contract that ties this deployment stack to the first crates:
-- choose `sqlx` explicitly for metadata store access unless a blocker is found
+Before implementation begins, write the v1 implementation contract that ties this deployment stack to the first projects:
+- choose `Microsoft.Data.Sqlite` explicitly for metadata store access unless a blocker is found
 - choose deterministic envelope encoding and golden-vector layout
-- publish the canonical state glossary mapping design states to Rust enum names, SQL values, metric labels, and admin labels
+- publish the canonical state glossary mapping design states to .NET enum names, SQL values, metric labels, and admin labels
 - define write reservation lifecycle states and expiry rules
 - set v1 max object size and transfer classes
 - define the first `hedgehog local-cluster up` generated file layout

@@ -1,8 +1,8 @@
-# Rust-First P2P Object Store Design Brief
+# .NET-First P2P Object Store Design Brief
 
 ## Goal
 
-Design a production-ready peer-to-peer object storage system in Rust.
+Design a production-ready peer-to-peer object storage system in .NET.
 
 The system should support:
 - public head nodes on IP addresses and ports
@@ -17,7 +17,7 @@ The system should support:
 
 Implementation sequencing is now canonicalized in [p2p-nosql-implementation-roadmap.md](p2p-nosql-implementation-roadmap.md). The first build target is metadata authority plus SQLite-backed state transitions, not transport polish or direct P2P exchange.
 
-The first implementation contract is now canonicalized in [p2p-nosql-implementation-contract.md](p2p-nosql-implementation-contract.md): `sqlx` with SQLite first, deterministic CBOR signed envelopes, shared state labels, explicit write reservations, `redb` storage-agent manifests/journals, a 64 MiB whole-object limit, transfer classes, and an early generated local-cluster harness.
+The first implementation contract is now canonicalized in [p2p-nosql-implementation-contract.md](p2p-nosql-implementation-contract.md): `Microsoft.Data.Sqlite` with SQLite first, deterministic CBOR signed envelopes, shared state labels, explicit write reservations, agent-local SQLite storage-agent manifests/journals, a 64 MiB whole-object limit, transfer classes, and an early generated local-cluster harness.
 
 ## Core Product Shape
 
@@ -106,11 +106,11 @@ V1-alpha backend decision:
 - SQLite is the first authoritative metadata store.
 - Use transactions, constraints, indexes, migrations, deterministic tests, and local backup/export/restore workflows before adding distributed metadata complexity.
 - Keep metadata workflows backend-conscious but SQL-oriented so PostgreSQL can become a later production backend.
-- PostgreSQL, FoundationDB, and Rust-native Raft remain later options if metadata scale, concurrency, distribution, or product goals justify the operational cost.
+- PostgreSQL, FoundationDB, and custom consensus-backed metadata remain later options if metadata scale, concurrency, distribution, or product goals justify the operational cost.
 
-## Rust Implementation Direction
+## .NET Implementation Direction
 
-Rust should be the main programming language for:
+.NET should be the main programming language for:
 - head nodes
 - storage node agent
 - client library
@@ -118,17 +118,17 @@ Rust should be the main programming language for:
 - observability plumbing
 - on-disk data handling
 
-Suggested Rust ecosystem building blocks:
-- async runtime: `tokio`
-- HTTP APIs: `axum` or `actix-web`
-- gRPC or internal RPC if needed: `tonic`
-- serialization: `serde`, `serde_json`, `bincode` or `postcard`
-- crypto: `ring`, `rustls`, `age`-style primitives if appropriate
-- metrics: `metrics`, `prometheus-client`, or OpenTelemetry Rust SDK
-- logging: `tracing`, `tracing-subscriber`
-- config: `figment` or plain typed config
-- metadata database access: `sqlx` with explicit migrations against SQLite first
-- storage-agent local data: file-per-object plus an embedded manifest/index store such as `redb`
+Suggested .NET ecosystem building blocks:
+- runtime and hosting: .NET Generic Host
+- HTTP APIs: ASP.NET Core Minimal APIs
+- gRPC or internal RPC if needed: ASP.NET Core gRPC
+- serialization: `System.Text.Json` plus a deterministic envelope encoder for signed bytes
+- crypto: `System.Security.Cryptography` and ASP.NET Core TLS primitives
+- metrics and tracing: OpenTelemetry .NET SDK with Prometheus-compatible export
+- logging: `Microsoft.Extensions.Logging`
+- config: `Microsoft.Extensions.Configuration`
+- metadata database access: `Microsoft.Data.Sqlite` with explicit migrations against SQLite first
+- storage-agent local data: file-per-object plus an agent-local SQLite manifest/journal
 
 ## Required System Properties
 
@@ -276,7 +276,7 @@ The system should be understandable enough for community and university deployme
 
 The next design pass should produce:
 - component diagram
-- Rust crate layout
+- .NET project layout
 - metadata schema (started in `p2p-nosql-metadata-plane.md` and `p2p-object-store-sqlite-schema-plan.md`)
 - replication state machine (started in `p2p-nosql-replication-repair-state-machine.md`)
 - capacity-control policy (started in `p2p-nosql-capacity-admission.md`)
@@ -305,7 +305,7 @@ Do not add these yet:
 
 - What is the canonical key recovery story?
 - What exact SQLite backup/export/restore workflow is required for beta?
-- What is the exact Rust workspace and crate layout for the first scaffold?
+- What is the exact .NET solution and project layout for the first scaffold?
 - Should storage nodes use push, pull, or hybrid repair sync?
 - How strict should quota enforcement be at the user and tenant level?
 - How do we prevent abuse from volunteer storage nodes?
@@ -313,8 +313,8 @@ Do not add these yet:
 - What is the exact capacity admission and repair-reserve formula?
 - What is the v1 security authority model for invitations, revocation, signed envelopes, and head-node limits?
 - What should the admin dashboard, metrics taxonomy, alerts, and incident runbooks look like against the canonical v1 model?
-- What is the crate-by-crate implementation roadmap and beta exit plan?
-- How should the degraded-mode cache fixtures be represented in `hedgehog-metadata-core`, `hedgehog-metadata-sql`, and `hedgehog-head` tests?
+- What is the project-by-project implementation roadmap and beta exit plan?
+- How should the degraded-mode cache fixtures be represented in `Hedgehog.Metadata.Core`, `Hedgehog.Metadata.Sqlite`, and `Hedgehog.Head` tests?
 
 ## Working Thesis
 
@@ -326,6 +326,6 @@ The accepted v1-alpha architecture is:
 - whole-object replication
 - background re-replication and repair
 - hard admission control before storage exhaustion
-- Rust for the entire system stack
+- .NET for the entire system stack
 
 PostgreSQL remains a deferred production backend, not the first implementation target.

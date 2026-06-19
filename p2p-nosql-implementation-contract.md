@@ -2,37 +2,38 @@
 
 ## Slice
 
-This pass freezes the first implementation contract for the Rust-first build.
+This pass freezes the first implementation contract for the .NET-first build.
 
-The goal is to prevent the first crates from quietly becoming separate authorities. `hedgehog-types`, `hedgehog-crypto`, `hedgehog-metadata-core`, `hedgehog-metadata-sql`, storage agents, heads, admin tooling, and the local cluster must share the same database, state names, signature bytes, reservation lifecycle, object size classes, and test posture from the first scaffold.
+The goal is to prevent the first projects from quietly becoming separate authorities. `Hedgehog.Types`, `Hedgehog.Crypto`, `Hedgehog.Metadata.Core`, `Hedgehog.Metadata.Sqlite`, storage agents, heads, admin tooling, and the local cluster must share the same database, state names, signature bytes, reservation lifecycle, object size classes, and test posture from the first scaffold.
 
 ## Contract Decisions
 
 ### SQLite-First SQL Client
 
-Use `sqlx` with SQLite for v1-alpha.
+Use `Microsoft.Data.Sqlite` with SQLite for v1-alpha.
 
 Reasons:
-- compile-time checked SQL fits the explicit migration and transaction-heavy roadmap
-- the built-in migration runner keeps CI, the migrator service, and local cluster aligned
-- query macros make state-name drift visible early when SQL enum/text values change
+- SQLite is first-class in .NET, easy to run locally, and simple to inspect
+- explicit command/transaction code fits the transaction-heavy metadata roadmap
+- a project-owned migration runner keeps CI, the migrator service, and local cluster aligned
+- workflow tests make state-name drift visible early when SQL accepted values change
 - SQLite keeps the first implementation local, inspectable, and easy to test
 
 Rules:
-- do not introduce PostgreSQL-specific client crates in v1-alpha service crates
+- do not introduce PostgreSQL-specific client packages in v1-alpha service projects
 - use explicit transactions for all metadata mutations
 - keep query text near the workflow that owns the transaction
 - avoid SQL triggers for the main state machine
-- use Rust state-transition functions before issuing update statements
+- use `Hedgehog.Metadata.Core` state-transition functions before issuing update statements
 
-PostgreSQL is deferred to the production backend track. When it is added, it should be implemented behind the same named metadata workflows rather than changing service-crate authority boundaries.
+PostgreSQL is deferred to the production backend track. When it is added, it should be implemented behind the same named metadata workflows rather than changing service-project authority boundaries.
 
 ### Migration Layout
 
-Use a single migrations directory owned by `hedgehog-metadata-sql`:
+Use a single migrations directory owned by `Hedgehog.Metadata.Sqlite`:
 
 ```text
-crates/hedgehog-metadata-sql/migrations/sqlite/
+src/Hedgehog.Metadata.Sqlite/Migrations/
   0001_security_roots_tenants_datasets.sql
   0002_nodes_keys_capacity.sql
   0003_objects_versions_replicas.sql
@@ -41,14 +42,14 @@ crates/hedgehog-metadata-sql/migrations/sqlite/
   0006_capacity_reservations.sql
 ```
 
-The migrator service, CI tests, CLI local-cluster boot, and integration tests all use this same path through `sqlx::migrate!`.
+The migrator service, CI tests, CLI local-cluster boot, and integration tests all use this same embedded migration source.
 
 Migration policy:
 - forward-only during beta
 - transactional migrations where SQLite allows it
 - rollback means restore plus previous binary, not hand-written down migrations
 - every migration adds or updates invariant checks in the test harness
-- migrations that add states or labels must update the state glossary in `hedgehog-types`
+- migrations that add states or labels must update the state glossary in `Hedgehog.Types`
 
 First test database workflow:
 1. Create a disposable SQLite database in the generated runtime directory or test temp directory.
@@ -58,32 +59,32 @@ First test database workflow:
 5. Execute idempotent write-intent, reservation, replica completion, commit, delete marker, repair lease, and outbox replay fixtures.
 6. Close and remove the database.
 
-CI can later add a PostgreSQL backend matrix, but the first target is one pinned SQLite library/version behavior through the Rust crate.
+CI can later add a PostgreSQL backend matrix, but the first target is one pinned SQLite library/version behavior through the .NET project.
 
 ### Metadata Transaction Boundary
 
-`hedgehog-metadata-core` is the semantic authority. `hedgehog-metadata-sql` is the durable authority.
+`Hedgehog.Metadata.Core` is the semantic authority. `Hedgehog.Metadata.Sqlite` is the durable authority.
 
 Boundary:
-- `metadata-core` defines commands, preconditions, state transitions, invariant checks, and semantic errors
-- `metadata-sql` loads rows, starts the needed transaction, calls `metadata-core`, writes rows, writes idempotency records, writes outbox events, writes audit events, and commits
-- service crates call workflow functions in `metadata-sql`, not raw SQL
+- `Hedgehog.Metadata.Core` defines commands, preconditions, state transitions, invariant checks, and semantic errors
+- `Hedgehog.Metadata.Sqlite` loads rows, starts the needed transaction, calls `Hedgehog.Metadata.Core`, writes rows, writes idempotency records, writes outbox events, writes audit events, and commits
+- service projects call workflow functions in `Hedgehog.Metadata.Sqlite`, not raw SQL
 
 Recommended shape:
 
 ```text
-metadata_core::command::{CreateWriteIntent, CompleteReplica, CommitVersion, DeleteObject, LeaseRepair}
-metadata_core::decision::{Decision, RowPatch, OutboxIntent, AuditIntent}
-metadata_sql::workflow::{create_write_intent, complete_replica, commit_version, delete_object, lease_repair}
+Hedgehog.Metadata.Core.Commands::{CreateWriteIntent, CompleteReplica, CommitVersion, DeleteObject, LeaseRepair}
+Hedgehog.Metadata.Core.Decisions::{Decision, RowPatch, OutboxIntent, AuditIntent}
+Hedgehog.Metadata.Sqlite.Workflows::{CreateWriteIntent, CompleteReplica, CommitVersion, DeleteObject, LeaseRepair}
 ```
 
 Do not expose a generic "update replica state" database API to heads, repair workers, admin UI, or storage agents. Every mutation should be a named workflow with idempotency and audit behavior.
 
 ### Canonical State Glossary
 
-All v1 state values are defined in `hedgehog-types`. SQL, metrics, admin filters, dashboards, fixture names, and logs must use these exact stable labels unless a display layer explicitly maps them.
+All v1 state values are defined in `Hedgehog.Types`. SQL, metrics, admin filters, dashboards, fixture names, and logs must use these exact stable labels unless a display layer explicitly maps them.
 
-This table is reconciled with [p2p-nosql-scaffold-contract.md](p2p-nosql-scaffold-contract.md). The scaffold contract is the seed source until `hedgehog-types` exists; after that, `hedgehog-types` becomes the executable source and both documents must be checked against it.
+This table is reconciled with [p2p-nosql-scaffold-contract.md](p2p-nosql-scaffold-contract.md). `Hedgehog.Types` is the executable source and both documents must be checked against it.
 
 Object state:
 - `active`
@@ -170,7 +171,7 @@ Audit decision:
 - `replayed`
 
 Each label should have:
-- Rust enum variant
+- .NET enum member or label registry entry
 - SQL accepted value
 - metrics label
 - admin display label
@@ -218,9 +219,9 @@ A write is admissible only if all selected nodes remain above hard reject after 
 
 Use deterministic CBOR for v1 signed envelopes.
 
-Recommended crate direction:
-- `ciborium` or another well-maintained CBOR crate for encoding/decoding
-- `serde` only over fixed structs from `hedgehog-types`
+Recommended package direction:
+- a well-maintained deterministic CBOR package, or a small canonical encoder owned by `Hedgehog.Crypto`
+- fixed DTOs from `Hedgehog.Types`
 - canonical map/key ordering enforced by tests or an explicit wrapper
 - no ad hoc JSON canonicalization
 
@@ -256,7 +257,7 @@ The signature covers canonical envelope bytes and a domain-separation string suc
 
 ### Storage-Agent Manifest And Journal
 
-Use file-per-object ciphertext plus `redb` for the initial storage-agent manifest and command journal.
+Use file-per-object ciphertext plus an agent-local SQLite manifest and command journal for the initial storage-agent implementation.
 
 Layout:
 
@@ -264,14 +265,13 @@ Layout:
 agent-data/
   objects/<tenant>/<dataset>/<version>/<replica>.ciphertext
   temp/
-  redb/manifest.redb
-  redb/journal.redb
+  agent-state.sqlite
 ```
 
 Rationale:
 - file-per-object keeps whole-object v1 easy to inspect and recover
-- `redb` avoids bringing in RocksDB operational weight for volunteer PCs
-- the manifest and journal can be crash-tested as a small Rust subsystem before network service behavior
+- SQLite avoids bringing in RocksDB operational weight for volunteer PCs and keeps crash-state inspection easy in .NET
+- the manifest and journal can be crash-tested as a small .NET subsystem before network service behavior
 
 Manifest records:
 - replica id
@@ -337,9 +337,9 @@ These are starting constants for tests and local cluster, not production tuning 
 
 ### Local Cluster Timing
 
-Pull `hedgehog-local-cluster` forward into Milestone 1 as a thin harness.
+Pull `Hedgehog.LocalCluster` forward into Milestone 1 as a thin harness.
 
-The first harness exists when `metadata-sql` can:
+The first harness exists when `Hedgehog.Metadata.Sqlite` can:
 - run migrations
 - create tenant
 - create dataset
@@ -366,8 +366,8 @@ target/local-cluster/
 Repository-owned sources:
 
 ```text
-crates/hedgehog-local-cluster/
-  src/generate.rs
+src/Hedgehog.LocalCluster/
+  Generate.cs
   templates/
   dashboards/
 ```
@@ -376,17 +376,17 @@ crates/hedgehog-local-cluster/
 
 ## First Scaffold Order
 
-1. Create `hedgehog-types` with IDs, epochs, errors, state enums, and glossary tests.
-2. Create `hedgehog-crypto` with deterministic CBOR envelope fixtures.
-3. Create `hedgehog-metadata-core` with reservation and replica transition tests.
-4. Create `hedgehog-metadata-sql` with `sqlx`, migrations, fixtures, and invariant checks.
-5. Create thin `hedgehog-local-cluster` migrator/SQLite harness.
+1. Create `Hedgehog.Types` with IDs, epochs, errors, state enums or label registries, and glossary tests.
+2. Create `Hedgehog.Crypto` with deterministic CBOR envelope fixtures.
+3. Create `Hedgehog.Metadata.Core` with reservation and replica transition tests.
+4. Create `Hedgehog.Metadata.Sqlite` with `Microsoft.Data.Sqlite`, migrations, fixtures, and invariant checks.
+5. Create thin `Hedgehog.LocalCluster` migrator/SQLite harness.
 6. Add storage-agent manifest/journal crash tests before networked storage-agent service code.
 
 ## Beta Blockers Added By This Contract
 
-- `sqlx` migration path works identically in CI, migrator service, CLI local cluster, and tests
-- canonical state labels are shared by Rust, SQL, metrics, admin filters, and docs
+- SQLite migration path works identically in CI, migrator service, CLI local cluster, and tests
+- canonical state labels are shared by .NET, SQL, metrics, admin filters, and docs
 - deterministic CBOR envelope golden vectors pass before head/client/admin signing flows
 - write reservation lifecycle has expiry, release, conversion, and cleanup tests
 - local cluster can run first metadata workflows before storage networking exists
@@ -394,10 +394,10 @@ crates/hedgehog-local-cluster/
 
 ## Next Unresolved Portion
 
-The next design slice should define the Rust crate layout and first scaffold package:
-- exact workspace members
+The next design slice should define the .NET project layout and first scaffold package:
+- exact solution members
 - concept ownership map for IDs, states, errors, envelopes, migrations, invariants, metrics, and admin labels
-- allowed and forbidden crate dependencies
+- allowed and forbidden project/package dependencies
 - feature-flag policy
 - metadata workflow rules for transaction boundaries, guarded updates, retry, idempotency, outbox, and audit writes
 - canonical envelope-vector directory and generation command

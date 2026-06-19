@@ -30,7 +30,7 @@ It must not provide:
 Use one outbound connection from each storage agent to the head tier.
 
 Recommended v1:
-- `tonic` bidirectional streaming gRPC over `rustls`
+- ASP.NET Core bidirectional streaming gRPC over TLS
 - signed protocol envelopes on top of mTLS or noise-style peer identity
 - one logical `AgentControlStream` per connected head node
 - separate bounded data streams for large object transfer if needed
@@ -39,7 +39,7 @@ Rationale:
 - storage nodes do not need inbound firewall holes
 - bidirectional streaming handles commands and ACKs naturally
 - typed protobuf schemas are easier to evolve than ad hoc JSON
-- Rust server/client support is mature
+- .NET server/client support is mature
 
 Keep libp2p as a later option for decentralized peer-to-peer repair. The first production slice is safer if agents connect to known head nodes and the metadata plane remains authoritative.
 
@@ -386,17 +386,17 @@ Structured log fields:
 - `result`
 - `error_code`
 
-## Rust Crate Implications
+## .NET Project Implications
 
 The storage protocol should be separated from agent implementation:
 
-- `p2pnosql-agent-proto`: protobuf definitions and generated Rust types
-- `p2pnosql-agent-client`: head-side command sender and stream manager
-- `p2pnosql-agent-core`: command state machine, validation, fencing, and idempotency
-- `p2pnosql-agent-store`: local disk layout, manifests, temp files, and tombstones
-- `p2pnosql-agent-service`: runnable storage-agent binary
+- `Hedgehog.Agent.Protocol`: protobuf definitions and generated .NET types
+- `Hedgehog.Agent.Client`: head-side command sender and stream manager
+- `Hedgehog.Agent.Core`: command state machine, validation, fencing, and idempotency
+- `Hedgehog.Agent.Store`: local disk layout, manifests, temp files, and tombstones
+- `Hedgehog.StorageAgent`: runnable storage-agent service
 
-Keep fencing and idempotency in `agent-core`, not inside tonic handlers, so protocol behavior can be tested without network services.
+Keep fencing and idempotency in `Hedgehog.Agent.Core`, not inside transport handlers, so protocol behavior can be tested without network services.
 
 ## Decisions Made In This Pass
 

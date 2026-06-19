@@ -232,8 +232,8 @@ Accepted findings:
 
 The observability and admin-operations slice is captured in `p2p-nosql-admin-observability-ops.md`.
 
-The next design slice should define implementation roadmap and Rust workspace sequencing:
-- crate-by-crate build order
+The next design slice should define implementation roadmap and .NET solution sequencing:
+- project-by-project build order
 - first migrations
 - test harnesses
 - minimal local cluster

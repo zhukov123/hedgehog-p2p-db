@@ -2,13 +2,13 @@
 
 This file preserves ordered scaffold-contract content split from `p2p-nosql-scaffold-contract.md` so GitHub API publishing can avoid large single-file payload limits.
 
-# P2P NoSQL Rust Scaffold Contract
+# P2P NoSQL .NET Scaffold Contract
 
 ## Purpose
 
-This is the implementation-facing contract for the first Rust scaffold.
+This is the implementation-facing contract for the first .NET scaffold.
 
-Use it as the source of truth for crate ownership, dependency direction, state labels, SQL labels, metrics, admin filters, workflow fixtures, and recovery gates. Broader architecture notes remain background context; the first crates should validate against this file and `p2p-nosql-implementation-contract.md`.
+Use it as the source of truth for project ownership, dependency direction, state labels, SQL labels, metrics, admin filters, workflow fixtures, and recovery gates. Broader architecture notes remain background context; the first projects should validate against this file and `p2p-nosql-implementation-contract.md`.
 
 ## Source Priority
 
@@ -20,26 +20,26 @@ Use it as the source of truth for crate ownership, dependency direction, state l
 6. `p2p-nosql-security-authority.md`
 7. Older architecture and MVP documents
 
-If an older document uses conflicting implementation labels, crate names, or workflow names, this contract wins.
+If an older document uses conflicting implementation labels, project names, or workflow names, this contract wins.
 
-## Crate Ownership Map
+## Project Ownership Map
 
-| Concept | Owner crate | Allowed dependents | Forbidden dependents | Golden source | First fixtures |
+| Concept | Owner project | Allowed dependents | Forbidden dependents | Golden source | First fixtures |
 | --- | --- | --- | --- | --- | --- |
-| Stable IDs, state labels, reason codes, transfer classes | `hedgehog-types` | all crates | none | generated Rust enums plus SQL label tests | `crates/hedgehog-types/tests/state_labels.rs` |
-| Signed envelopes and canonical bytes | `hedgehog-crypto` | head, metadata-sql, admin, CLI | storage-agent business logic deciding authority | deterministic CBOR vectors | `crates/hedgehog-crypto/tests/envelope_vectors.rs` |
-| Semantic state transitions | `hedgehog-metadata-core` | metadata-sql, repair tests, local-cluster tests | head raw SQL, agent raw SQL, admin raw SQL | pure Rust transition tables | `crates/hedgehog-metadata-core/tests/transitions.rs` |
-| SQLite-first durable workflows | `hedgehog-metadata-sql` | head, repair, admin, CLI, local-cluster | direct SQL mutation from service crates | migrations plus workflow matrix below | `crates/hedgehog-metadata-sql/tests/workflows.rs` |
-| Storage-agent local manifest and journal | `hedgehog-agent-store` | storage-agent, local-cluster tests | metadata-sql, head | `redb` schema plus crash fixtures | `crates/hedgehog-agent-store/tests/crash_reconcile.rs` |
-| Storage-agent service protocol | `hedgehog-storage-agent` | local-cluster | metadata-sql direct authority | protobuf or RPC schema and command journal | `crates/hedgehog-storage-agent/tests/protocol_idempotency.rs` |
-| Public head service | `hedgehog-head` | local-cluster | storage-agent deciding metadata authority | service workflow wrappers | `crates/hedgehog-head/tests/degraded_cache.rs` |
-| Repair scheduler | `hedgehog-repair` | local-cluster | direct replica mutation without metadata-sql workflow | repair lease workflows | `crates/hedgehog-repair/tests/pressure_ordering.rs` |
-| Admin and observability labels | `hedgehog-admin`, `hedgehog-observability` | local-cluster | defining new state names | `hedgehog-types` display mapping | `crates/hedgehog-admin/tests/filter_labels.rs` |
-| Generated local cluster | `hedgehog-local-cluster` | CI | production-only hidden behavior | Compose and fixture manifests | `crates/hedgehog-local-cluster/tests/chaos.rs` |
+| Stable IDs, state labels, reason codes, transfer classes | `Hedgehog.Types` | all projects | none | .NET label registry plus SQL label tests | `tests/Hedgehog.Types.Tests/StateLabelsTests.cs` |
+| Signed envelopes and canonical bytes | `Hedgehog.Crypto` | head, metadata-sqlite, admin, CLI | storage-agent business logic deciding authority | deterministic CBOR vectors | `tests/Hedgehog.Crypto.Tests/EnvelopeVectorsTests.cs` |
+| Semantic state transitions | `Hedgehog.Metadata.Core` | metadata-sqlite, repair tests, local-cluster tests | head raw SQL, agent raw SQL, admin raw SQL | pure .NET transition tables | `tests/Hedgehog.Metadata.Core.Tests/TransitionsTests.cs` |
+| SQLite-first durable workflows | `Hedgehog.Metadata.Sqlite` | head, repair, admin, CLI, local-cluster | direct SQL mutation from service projects | migrations plus workflow matrix below | `tests/Hedgehog.Metadata.Sqlite.Tests/WorkflowsTests.cs` |
+| Storage-agent local manifest and journal | `Hedgehog.Agent.Store` | storage-agent, local-cluster tests | metadata-sqlite, head | embedded manifest schema plus crash fixtures | `tests/Hedgehog.Agent.Store.Tests/CrashReconcileTests.cs` |
+| Storage-agent service protocol | `Hedgehog.StorageAgent` | local-cluster | metadata-sqlite direct authority | protobuf or RPC schema and command journal | `tests/Hedgehog.StorageAgent.Tests/ProtocolIdempotencyTests.cs` |
+| Public head service | `Hedgehog.Head` | local-cluster | storage-agent deciding metadata authority | service workflow wrappers | `tests/Hedgehog.Head.Tests/DegradedCacheTests.cs` |
+| Repair scheduler | `Hedgehog.Repair` | local-cluster | direct replica mutation without metadata-sqlite workflow | repair lease workflows | `tests/Hedgehog.Repair.Tests/PressureOrderingTests.cs` |
+| Admin and observability labels | `Hedgehog.Admin`, `Hedgehog.Observability` | local-cluster | defining new state names | `Hedgehog.Types` display mapping | `tests/Hedgehog.Admin.Tests/FilterLabelsTests.cs` |
+| Generated local cluster | `Hedgehog.LocalCluster` | CI | production-only hidden behavior | Compose and fixture manifests | `tests/Hedgehog.LocalCluster.Tests/ChaosTests.cs` |
 
 ## Canonical Labels
 
-All Rust enums, SQL accepted values, metric labels, admin filters, and test fixture names must use lowercase labels from `p2p-nosql-implementation-contract.md`.
+All .NET enums or label registries, SQL accepted values, metric labels, admin filters, and test fixture names must use lowercase labels from `p2p-nosql-implementation-contract.md`.
 
 Do not import uppercase labels from `p2p-nosql-replication-repair-state-machine.md` into code, migrations, metrics, or fixtures. That document is useful for transition concepts only until it is rewritten to the canonical labels.
 
@@ -57,14 +57,14 @@ Required first labels:
 Validation command for the scaffold:
 
 ```text
-cargo xtask validate-scaffold-contract
+dotnet run --project tools/Hedgehog.Xtask -- validate-scaffold-contract
 ```
 
 The command should fail if any SQL migration, metric, admin filter, or fixture uses non-canonical implementation labels.
 
 ## SQL Workflow Matrix
 
-Every metadata mutation must be a named `hedgehog-metadata-sql` workflow. Service crates must not call generic update APIs.
+Every metadata mutation must be a named `Hedgehog.Metadata.Sqlite` workflow. Service projects must not call generic update APIs.
 
 | Workflow | Lock order | Isolation target | Idempotency scope | Audit timing | Outbox timing | Invariant checks |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -88,15 +88,14 @@ Deadlocks, serialization failures, stale fencing, duplicate idempotency keys, an
 
 Authority-sensitive cache lookups return only:
 
-```rust
-enum AuthorityCacheDecision<T> {
-    Fresh(T),
-    Deny(DenyReason),
-    Unavailable(UnavailableReason),
-}
+```csharp
+public abstract record AuthorityCacheDecision<T>;
+public sealed record Fresh<T>(T Value) : AuthorityCacheDecision<T>;
+public sealed record Deny<T>(DenyReason Reason) : AuthorityCacheDecision<T>;
+public sealed record Unavailable<T>(UnavailableReason Reason) : AuthorityCacheDecision<T>;
 ```
 
-Mutation workflows must call `hedgehog-metadata-sql` directly and cannot accept `Fresh<T>` as authority. Raw cached tenant, dataset, revocation, placement, invitation, capacity, or visibility records are allowed only in read-only status rendering modules.
+Mutation workflows must call `Hedgehog.Metadata.Sqlite` directly and cannot accept `Fresh<T>` as authority. Raw cached tenant, dataset, revocation, placement, invitation, capacity, or visibility records are allowed only in read-only status rendering modules.
 
 ## Recovery Readiness Gate
 

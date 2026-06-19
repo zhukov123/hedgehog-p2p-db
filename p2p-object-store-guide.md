@@ -42,7 +42,7 @@ flowchart LR
     Head -->|admin workflows| Meta
 ```
 
-The first implementation uses SQLite so development stays simple. The metadata workflow crate is still named generically, `hedgehog-metadata-sql`, so PostgreSQL can be added later without changing the authority model.
+The first implementation uses SQLite so development stays simple. The metadata workflow project is still named generically, `Hedgehog.Metadata.Sqlite`, so PostgreSQL can be added later without changing the authority model.
 
 ## What The System Stores
 
@@ -131,7 +131,7 @@ It must not independently decide:
 
 The metadata store is the authority.
 
-In v1-alpha it is SQLite, accessed through `hedgehog-metadata-sql`.
+In v1-alpha it is SQLite, accessed through `Hedgehog.Metadata.Sqlite`.
 
 It owns:
 - tenants and datasets
@@ -335,7 +335,7 @@ Direct agent-to-agent repair is deferred because it adds peer discovery, NAT tra
 
 ## State Labels
 
-Canonical state labels are lowercase. These labels are used in Rust enums, SQL values, fixtures, metrics, admin filters, and dashboards.
+Canonical state labels are lowercase. These labels are used in .NET enums, SQL values, fixtures, metrics, admin filters, and dashboards.
 
 Object version states:
 - `writing`
@@ -596,7 +596,7 @@ Not v1-alpha:
 - chunk-level repair
 - browser/mobile storage agents
 - multi-cluster federation
-- Rust-native Raft metadata
+- custom consensus-backed metadata
 
 These are tracked in [p2p-object-store-deferred-design.md](p2p-object-store-deferred-design.md).
 

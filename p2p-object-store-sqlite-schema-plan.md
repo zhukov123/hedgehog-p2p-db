@@ -6,9 +6,9 @@ This pass turns the metadata and replication/repair state-machine design into a 
 
 Principles:
 - the metadata store enforces identity, uniqueness, monotonic epochs, and no-duplicate-active-work invariants.
-- Rust `metadata-core` enforces workflow semantics, state transitions, placement policy, and repair priority.
+- .NET `metadata-core` enforces workflow semantics, state transitions, placement policy, and repair priority.
 - Storage agents never decide object liveness.
-- Triggers should be avoided for the main state machine; use explicit Rust transactions and tests.
+- Triggers should be avoided for the main state machine; use explicit .NET transactions and tests.
 
 SQLite conventions:
 - IDs are stored as lowercase text UUIDs unless a later implementation chooses 16-byte BLOB IDs consistently.
@@ -258,7 +258,7 @@ Steps:
 5. Mark versions `gc_eligible`.
 6. Delete physical metadata in small batches after outbox confirmation.
 
-## SQL Constraints vs Rust Checks
+## SQL Constraints vs .NET Checks
 
 SQL constraints should enforce:
 - identity uniqueness
@@ -270,7 +270,7 @@ SQL constraints should enforce:
 - monotonic uniqueness of `(object_id, version_no)` and `(object_id, delete_epoch)`
 - replica uniqueness per node/version
 
-Rust `metadata-core` should enforce:
+.NET `metadata-core` should enforce:
 - legal state transitions
 - quorum and required-replica semantics
 - placement policy
@@ -281,7 +281,7 @@ Rust `metadata-core` should enforce:
 
 Warning:
 - do not bury the state machine in SQL triggers
-- keep transition logic in Rust with explicit transactions and deterministic tests
+- keep transition logic in .NET with explicit transactions and deterministic tests
 
 ## Beta Migration and Rollback Policy
 
@@ -317,7 +317,7 @@ This document was originally reviewed as a PostgreSQL schema plan. It is now the
 
 Accepted findings:
 - the metadata store should reject identity, race, and duplicate-active-work errors.
-- Rust should own state-machine semantics.
+- .NET should own state-machine semantics.
 - The core tables are `objects`, `object_versions`, `replicas`, `leases`, `repair_jobs`, `tombstones`, `idempotency_records`, and `outbox_events`.
 - SQLite repair leasing should use guarded claim updates; PostgreSQL may later use skip-locked leasing behind the same workflow API.
 - Recovery drills must prove outbox replay and fencing behavior, not merely database restore.

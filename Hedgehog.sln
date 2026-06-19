@@ -1,0 +1,57 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{431CC250-C704-427F-88AC-D1CAEBC21285}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Hedgehog.Types", "src\Hedgehog.Types\Hedgehog.Types.csproj", "{67EA704A-3D7B-4636-8089-454A1773EA9F}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Hedgehog.Crypto", "src\Hedgehog.Crypto\Hedgehog.Crypto.csproj", "{F6F77843-8DA1-49EF-BED7-FF19820913CD}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Hedgehog.Metadata.Core", "src\Hedgehog.Metadata.Core\Hedgehog.Metadata.Core.csproj", "{B9323750-6B65-45DC-ACD6-5966B390636D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Hedgehog.Metadata.Sqlite", "src\Hedgehog.Metadata.Sqlite\Hedgehog.Metadata.Sqlite.csproj", "{767851DE-3571-46D1-B98F-8D99F665B9C1}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tools", "tools", "{0AD395B5-56F0-4BE3-A6E4-EDC10AE4CE15}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Hedgehog.Xtask", "tools\Hedgehog.Xtask\Hedgehog.Xtask.csproj", "{BFB406E3-9CC1-469A-B5E1-1A52EBF07FA5}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{67EA704A-3D7B-4636-8089-454A1773EA9F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{67EA704A-3D7B-4636-8089-454A1773EA9F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{67EA704A-3D7B-4636-8089-454A1773EA9F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{67EA704A-3D7B-4636-8089-454A1773EA9F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F6F77843-8DA1-49EF-BED7-FF19820913CD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F6F77843-8DA1-49EF-BED7-FF19820913CD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F6F77843-8DA1-49EF-BED7-FF19820913CD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F6F77843-8DA1-49EF-BED7-FF19820913CD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B9323750-6B65-45DC-ACD6-5966B390636D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B9323750-6B65-45DC-ACD6-5966B390636D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B9323750-6B65-45DC-ACD6-5966B390636D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B9323750-6B65-45DC-ACD6-5966B390636D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{767851DE-3571-46D1-B98F-8D99F665B9C1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{767851DE-3571-46D1-B98F-8D99F665B9C1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{767851DE-3571-46D1-B98F-8D99F665B9C1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{767851DE-3571-46D1-B98F-8D99F665B9C1}.Release|Any CPU.Build.0 = Release|Any CPU
+		{BFB406E3-9CC1-469A-B5E1-1A52EBF07FA5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{BFB406E3-9CC1-469A-B5E1-1A52EBF07FA5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{BFB406E3-9CC1-469A-B5E1-1A52EBF07FA5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{BFB406E3-9CC1-469A-B5E1-1A52EBF07FA5}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{67EA704A-3D7B-4636-8089-454A1773EA9F} = {431CC250-C704-427F-88AC-D1CAEBC21285}
+		{F6F77843-8DA1-49EF-BED7-FF19820913CD} = {431CC250-C704-427F-88AC-D1CAEBC21285}
+		{B9323750-6B65-45DC-ACD6-5966B390636D} = {431CC250-C704-427F-88AC-D1CAEBC21285}
+		{767851DE-3571-46D1-B98F-8D99F665B9C1} = {431CC250-C704-427F-88AC-D1CAEBC21285}
+		{BFB406E3-9CC1-469A-B5E1-1A52EBF07FA5} = {0AD395B5-56F0-4BE3-A6E4-EDC10AE4CE15}
+	EndGlobalSection
+EndGlobal

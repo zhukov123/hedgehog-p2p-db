@@ -101,7 +101,7 @@ Add a tiny admin surface:
 
 Support at least:
 - TypeScript/JavaScript
-- Rust
+- .NET
 - Python
 
 ## MVP Milestones

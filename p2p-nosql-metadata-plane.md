@@ -2,7 +2,7 @@
 
 ## Slice
 
-This pass refines the metadata plane only. It assumes the Rust-first architecture already chosen elsewhere: public head nodes route requests, storage agents sit behind outbound connections, clients encrypt payloads before upload, and storage nodes only keep ciphertext.
+This pass refines the metadata plane only. It assumes the .NET-first architecture already chosen elsewhere: public head nodes route requests, storage agents sit behind outbound connections, clients encrypt payloads before upload, and storage nodes only keep ciphertext.
 
 ## Metadata Plane Job
 
@@ -34,20 +34,20 @@ Recommendation:
 - SQLite as the authoritative v1-alpha metadata store
 - a single metadata writer authority for the first local and small-cluster builds
 - local backup/export/restore drills before beta
-- `sqlx` for Rust database access and explicit migrations
-- `axum` for admin and internal APIs around the metadata boundary
-- `tonic` or typed HTTP for head-node to metadata-plane calls
+- `Microsoft.Data.Sqlite` for .NET database access and explicit migrations
+- ASP.NET Core for admin and internal APIs around the metadata boundary
+- ASP.NET Core gRPC or typed HTTP for head-node to metadata-plane calls
 - every mutating metadata command is idempotent by `command_id`
 
 The first version should not shard metadata or require a distributed metadata database. Sharding before the workflows are stable would multiply every design problem: repair, capacity accounting, leases, schema migration, audit, and backup.
 
-PostgreSQL remains the preferred later production SQL backend when multi-head concurrency, stronger operational backup/restore, backup archiving, failover, and mature database observability are needed. Rust-native Raft remains valuable, but not as the v1 default. `openraft` plus `redb` or RocksDB would make the project responsible for membership, snapshots, log compaction, corruption recovery, migrations, state-machine determinism, backup/restore, rolling upgrades, and operator playbooks before the product model itself has settled. FoundationDB is a credible later metadata backend if scale demands distributed transactional storage, but it adds operational and data-modeling burden early.
+PostgreSQL remains the preferred later production SQL backend when multi-head concurrency, stronger operational backup/restore, backup archiving, failover, and mature database observability are needed. Custom consensus-backed metadata remains valuable, but not as the v1 default. Building a Raft-backed metadata store would make the project responsible for membership, snapshots, log compaction, corruption recovery, migrations, state-machine determinism, backup/restore, rolling upgrades, and operator playbooks before the product model itself has settled. FoundationDB is a credible later metadata backend if scale demands distributed transactional storage, but it adds operational and data-modeling burden early.
 
 Decision:
 - v1-alpha uses SQLite for metadata simplicity and implementation speed.
 - PostgreSQL is deferred to the production backend track.
 - FoundationDB is deferred until metadata scale or distribution pressure justifies it.
-- Rust-native Raft is a research/v3 path, not the first control plane.
+- Custom consensus-backed metadata is a research/v3 path, not the first control plane.
 
 ## Topology
 
@@ -282,21 +282,20 @@ Every mutating command records:
 
 Schema migrations must be explicit metadata commands with a cluster-wide schema version. Storage agents should include their supported protocol and schema versions in every heartbeat so the metadata plane can block incompatible placement.
 
-## Rust Crate Implications
+## .NET Project Implications
 
-The metadata slice should become its own crate boundary early:
+The metadata slice should become its own project boundary early:
 
-- `p2pnosql-metadata-core`: state types, commands, events, invariants
-- `p2pnosql-metadata-store`: redb/RocksDB adapter and snapshots
-- `p2pnosql-metadata-raft`: consensus integration
-- `p2pnosql-metadata-api`: typed internal/admin API handlers
-- `p2pnosql-proto`: shared wire types for head, agent, and metadata services
+- `Hedgehog.Metadata.Core`: state types, commands, events, invariants
+- `Hedgehog.Metadata.Sqlite`: SQLite workflows, migrations, and tests
+- `Hedgehog.Metadata.Api`: typed internal/admin API handlers when the metadata plane becomes a separate process
+- `Hedgehog.Protocol`: shared wire types for head, agent, and metadata services
 
 Keep command validation in `metadata-core`, not in the HTTP layer, so tests can exercise metadata transitions without running services.
 
 ## Decisions Made In This Pass
 
-- Start with SQLite as the authoritative v1-alpha metadata store, not a custom Rust Raft service.
+- Start with SQLite as the authoritative v1-alpha metadata store, not a custom consensus service.
 - Head nodes are allowed to cache committed read state only; they do not own placement or lease decisions.
 - Writes require metadata reservations and fencing-token leases before storage agents mutate disk.
 - Metadata capacity accounting is pessimistic and may reject writes before storage agents report full usage.
@@ -313,7 +312,7 @@ Accepted findings:
 - SQLite is the simplest first metadata plane because it gives local transactions, constraints, indexes, migrations, and easy test setup.
 - PostgreSQL remains the likely production backend once multi-head concurrency, HA, and mature operational backup/restore are required.
 - FoundationDB remains technically strong but should wait until the team needs distributed transactional scale and is ready for KV-layer modeling.
-- `openraft` plus `redb` or RocksDB should wait because it makes the project responsible for building and operating a database before the product semantics are stable.
+- custom consensus-backed metadata should wait because it makes the project responsible for building and operating a database before the product semantics are stable.
 - The term "P2P" must not obscure the need for a boring, highly reliable control plane.
 - Metadata leakage must be treated as a first-class privacy risk.
 

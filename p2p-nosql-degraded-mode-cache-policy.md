@@ -82,7 +82,7 @@ Rejected in every metadata outage state:
 4. Positive authorization cannot be inferred from missing cache records.
 5. Deny records outlive allow records until metadata refresh proves otherwise.
 6. Any stale record required by a read makes the whole read fail closed.
-7. Mutating workflows call `metadata-sql` directly and do not accept cache-backed decisions.
+7. Mutating workflows call `Hedgehog.Metadata.Sqlite` directly and do not accept cache-backed decisions.
 8. Local degraded audit buffers are for denied attempts and status transitions only; allowed privileged actions are not buffered because they are not allowed.
 9. Agent telemetry received during outage is evidence for later reconciliation, not authority for placement or capacity.
 10. Recovery gates are explicit and observable before the head returns to `normal`.
@@ -130,12 +130,12 @@ Accepted with stricter v1 limits:
 
 ## Next Unresolved Portion
 
-The next design slice should define the Rust crate layout in enough detail to start scaffolding:
-- workspace members
-- crate ownership boundaries
-- feature flags
+The next design slice should define the .NET project layout in enough detail to start scaffolding:
+- solution members
+- project ownership boundaries
+- MSBuild properties
 - shared error and ID types
 - migration embedding
 - deterministic CBOR test-vector location
-- storage-agent manifest crash-test crate boundary
+- storage-agent manifest crash-test project boundary
 - local-cluster harness ownership

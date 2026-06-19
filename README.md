@@ -15,6 +15,7 @@ The accepted v1-alpha architecture is:
 Start here:
 - [Canonical architecture](p2p-nosql-architecture.md)
 - [Human guide with diagrams](p2p-object-store-guide.md)
+- [.NET design brief](p2p-object-store-dotnet-design-brief.md)
 - [Key model](p2p-object-store-key-model.md)
 - [Implementation contract](p2p-nosql-implementation-contract.md)
 - [Implementation roadmap](p2p-nosql-implementation-roadmap.md)
@@ -25,16 +26,16 @@ Historical NoSQL/database-oriented documents are retained for context only. They
 
 ## First Scaffold
 
-The repository now includes the first Rust workspace scaffold:
-- `hedgehog-types`
-- `hedgehog-crypto`
-- `hedgehog-metadata-core`
-- `hedgehog-metadata-sql`
-- `xtask`
+The repository now includes the first .NET solution scaffold:
+- `Hedgehog.Types`
+- `Hedgehog.Crypto`
+- `Hedgehog.Metadata.Core`
+- `Hedgehog.Metadata.Sqlite`
+- `Hedgehog.Xtask`
 
-Expected validation commands once Rust/Cargo is installed:
+Expected validation commands once the .NET SDK is installed:
 
 ```text
-cargo test
-cargo run -p xtask -- validate-scaffold-contract
+dotnet build
+dotnet run --project tools/Hedgehog.Xtask -- validate-scaffold-contract
 ```

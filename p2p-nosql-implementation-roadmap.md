@@ -8,17 +8,17 @@ The guiding rule is simple: build the metadata authority and state machine first
 
 Inputs folded into this roadmap:
 - SQLite is the v1-alpha metadata authority.
-- The first implementation contract is frozen in [p2p-nosql-implementation-contract.md](p2p-nosql-implementation-contract.md): use `sqlx` with SQLite first, deterministic CBOR envelopes, canonical state labels, `redb` storage-agent manifests/journals, 64 MiB whole-object limit, explicit transfer classes, and an early generated local-cluster harness.
+- The first implementation contract is frozen in [p2p-nosql-implementation-contract.md](p2p-nosql-implementation-contract.md): use `Microsoft.Data.Sqlite` with SQLite first, deterministic CBOR envelopes, canonical state labels, agent-local SQLite manifests/journals, 64 MiB whole-object limit, explicit transfer classes, and an early generated local-cluster harness.
 - Object versions are immutable.
 - Replica, repair, lease, placement-epoch, delete-epoch, and fencing-token rules are canonical.
 - Capacity admission is transactional in metadata and checked again locally by storage agents.
 - Security authority, signed envelopes, invitations, revocation, audit, and observability are beta blockers.
 
-## Crate Build Order
+## Project Build Order
 
-### 1. `hedgehog-types`
+### 1. `Hedgehog.Types`
 
-Shared model crate:
+Shared model project:
 - tenant, dataset, object, version, replica, node, lease, repair-job, invitation, key, and audit IDs
 - timestamps and epochs
 - object/version/replica/repair states
@@ -26,22 +26,22 @@ Shared model crate:
 - protocol error types
 - signed-envelope structs
 
-This crate must stay boring and stable. Other crates should not invent their own state names or ID formats.
+This project must stay boring and stable. Other projects should not invent their own state names or ID formats.
 
-### 2. `hedgehog-crypto`
+### 2. `Hedgehog.Crypto`
 
-Cryptographic helper crate:
+Cryptographic helper project:
 - envelope signing
 - deterministic CBOR canonical serialization for signed data
 - key IDs and key metadata
 - invitation token verification helpers
 - encryption metadata helpers
 
-Payload encryption remains client-side. This crate may define metadata needed to describe encrypted payloads, but it must not make servers plaintext-capable.
+Payload encryption remains client-side. This project may define metadata needed to describe encrypted payloads, but it must not make servers plaintext-capable.
 
-### 3. `hedgehog-config`
+### 3. `Hedgehog.Config`
 
-Configuration crate:
+Configuration project:
 - node config
 - tenant and dataset limits
 - metadata database path/DSN handling
@@ -49,9 +49,9 @@ Configuration crate:
 - capacity reserve policy
 - local-cluster config
 
-### 4. `hedgehog-metadata-core`
+### 4. `Hedgehog.Metadata.Core`
 
-Pure Rust state-machine crate with no database dependency.
+Pure .NET state-machine project with no database dependency.
 
 Owns:
 - object/version transitions
@@ -64,9 +64,9 @@ Owns:
 - capacity admission math
 - policy validation
 
-This crate is the heart of the system. The SQL metadata store enforces durable constraints, but `metadata-core` defines legal semantic moves.
+This project is the heart of the system. The SQL metadata store enforces durable constraints, but `metadata-core` defines legal semantic moves.
 
-### 5. `hedgehog-metadata-sql`
+### 5. `Hedgehog.Metadata.Sqlite`
 
 SQLite-first SQL implementation of metadata authority.
 
@@ -80,9 +80,9 @@ Owns:
 - idempotency records
 - SQLite integration tests
 
-Use `sqlx` with SQLite for v1-alpha. Do not introduce backend-specific SQL clients in service crates.
+Use `Microsoft.Data.Sqlite` with SQLite for v1-alpha. Do not introduce backend-specific SQL clients in service projects.
 
-### 6. `hedgehog-storage-agent`
+### 6. `Hedgehog.StorageAgent`
 
 Participant-machine storage agent:
 - local disk store
@@ -98,10 +98,10 @@ The agent stores ciphertext and evidence. It is not metadata authority.
 
 Initial local storage contract:
 - file-per-object ciphertext
-- `redb` manifest and command journal
+- agent-local SQLite manifest and command journal
 - crash tests for temp-file fsync, atomic rename, duplicate command replay, duplicate final ACK replay, stale fencing rejection, and delete during in-flight write before service networking
 
-### 7. `hedgehog-head`
+### 7. `Hedgehog.Head`
 
 Public head-node service:
 - authenticates signed envelopes
@@ -114,9 +114,9 @@ Public head-node service:
 
 Head nodes are replaceable coordinators, not trust roots.
 
-### 8. `hedgehog-repair`
+### 8. `Hedgehog.Repair`
 
-Repair worker crate:
+Repair worker project:
 - repair scanner
 - lease taker
 - placement executor
@@ -126,7 +126,7 @@ Repair worker crate:
 
 Repair must respect fencing tokens, placement epochs, delete epochs, node revocation epochs, and capacity reserves.
 
-### 9. `hedgehog-admin`
+### 9. `Hedgehog.Admin`
 
 Admin API surface:
 - node views and mutation actions
@@ -142,16 +142,16 @@ Developer/admin CLI.
 
 Build it early enough to drive integration tests and local-cluster workflows. Do not wait for a polished API to begin CLI work.
 
-### 11. `hedgehog-observability`
+### 11. `Hedgehog.Observability`
 
-Shared observability crate:
+Shared observability project:
 - metrics names
 - tracing helpers
 - health endpoint helpers
 - audit event schema helpers
 - redaction helpers for logs and metrics
 
-### 12. `hedgehog-local-cluster`
+### 12. `Hedgehog.LocalCluster`
 
 Development harness:
 - creates or opens the SQLite metadata database
@@ -161,7 +161,7 @@ Development harness:
 - drives CLI workflows
 - supports chaos and restart tests
 
-Deployment contract details are now canonicalized in [p2p-nosql-deployment-stack.md](p2p-nosql-deployment-stack.md). Although this crate appears late in the crate list, a thin generated Compose harness should start earlier: as soon as `hedgehog-metadata-sql` can create tenants, datasets, nodes, and object write intents. Waiting until polished services exist would delay migration, health, metrics, and restart testing too long.
+Deployment contract details are now canonicalized in [p2p-nosql-deployment-stack.md](p2p-nosql-deployment-stack.md). Although this project appears late in the project list, a thin generated Compose harness should start earlier: as soon as `Hedgehog.Metadata.Sqlite` can create tenants, datasets, nodes, and object write intents. Waiting until polished services exist would delay migration, health, metrics, and restart testing too long.
 
 The implementation contract pulls the first thin local-cluster harness into Milestone 1, before real upload streams exist.
 
@@ -195,7 +195,7 @@ Early indexes and constraints:
 
 ## Metadata-Core Test Harness
 
-`hedgehog-metadata-core` must be database-free and heavily tested before network work begins.
+`Hedgehog.Metadata.Core` must be database-free and heavily tested before network work begins.
 
 Required harness:
 - table-driven tests for every legal and illegal transition
@@ -216,7 +216,7 @@ Core invariant tests:
 - repair never reduces durability while trying to improve it
 - GC never deletes a replica still referenced by a live version or retained tombstone
 
-Mirror these scenarios in `hedgehog-metadata-sql` integration tests using real SQLite transactions.
+Mirror these scenarios in `Hedgehog.Metadata.Sqlite` integration tests using real SQLite transactions.
 
 ## Minimal Local Cluster
 
@@ -284,7 +284,7 @@ hedgehog gc run-once
 ### Milestone 0: Workspace and Foundations
 
 Scope:
-- crates
+- projects
 - config
 - IDs
 - errors
@@ -361,7 +361,7 @@ Scope:
 
 Use:
 - `area:metadata`
-- `area:metadata-sql`
+- `area:metadata-sqlite`
 - `area:storage-agent`
 - `area:head`
 - `area:repair`
@@ -402,30 +402,30 @@ Accepted design:
 - SQLite metadata lives in local runtime storage and is never exposed as a network service.
 - Storage agents remain outbound-only and own persistent data, journal, and temp volumes.
 - The migrator is a first-class service and uses the same migration path as CI.
-- Local-cluster generation belongs in the Rust workspace so integration tests, drills, dashboards, and secrets are reproducible.
+- Local-cluster generation belongs in the .NET solution so integration tests, drills, dashboards, and secrets are reproducible.
 
 Risk review:
-- Deployment work cannot wait until the end of the crate roadmap. A thin local-cluster harness should exist once metadata-sql can create tenants, datasets, nodes, and write intents.
+- Deployment work cannot wait until the end of the project roadmap. A thin local-cluster harness should exist once metadata-sqlite can create tenants, datasets, nodes, and write intents.
 - Static YAML alone will drift from code. Generate local Compose files from typed config and commit dashboard/provisioning sources.
 - Secrets must be generated into an ignored runtime directory for local development and provided explicitly for beta.
 - Health and readiness contracts need to be implemented before service behavior gets complicated, or restart and failure drills will become unreliable.
 
 Next decision:
-- Freeze the v1 implementation contract: choose `sqlx`, deterministic envelope encoding, canonical state glossary, write reservation lifecycle, max object size/transfer classes, and generated local-cluster file layout.
+- Freeze the v1 implementation contract: choose `Microsoft.Data.Sqlite`, deterministic envelope encoding, canonical state glossary, write reservation lifecycle, max object size/transfer classes, and generated local-cluster file layout.
 
 ## 2026-06-05 05:04 UTC Implementation Contract Review
 
 Accepted design:
-- SQLite access uses `sqlx` in v1-alpha, with one migration path shared by CI, migrator service, CLI local cluster, and integration tests.
+- SQLite access uses `Microsoft.Data.Sqlite` in v1-alpha, with one migration path shared by CI, migrator service, CLI local cluster, and integration tests.
 - Signed envelopes use deterministic CBOR with golden vectors before head/client/admin signing workflows.
-- Canonical state labels live in `hedgehog-types` and must map to SQL values, metrics labels, admin filters, and display labels.
+- Canonical state labels live in `Hedgehog.Types` and must map to SQL values, metrics labels, admin filters, and display labels.
 - Write reservations have explicit lifecycle states from `pending` through `leased`, `streaming`, `committed`, release/expiry/conversion, and cleanup-required paths.
-- Storage agents start with file-per-object ciphertext plus `redb` manifest and journal.
+- Storage agents start with file-per-object ciphertext plus an agent-local SQLite manifest and journal.
 - V1 whole-object writes are capped at 64 MiB with small, medium, and large transfer classes.
-- A thin generated local-cluster harness moves into Milestone 1 as soon as metadata-sql can run migrations and create early write reservations.
+- A thin generated local-cluster harness moves into Milestone 1 as soon as metadata-sqlite can run migrations and create early write reservations.
 
 Risk review:
-- The next implementation work should be a contract package, not service glue: `hedgehog-types`, `hedgehog-crypto`, `hedgehog-metadata-core`, `hedgehog-metadata-sql`, and a thin local-cluster harness.
+- The next implementation work should be a contract package, not service glue: `Hedgehog.Types`, `Hedgehog.Crypto`, `Hedgehog.Metadata.Core`, `Hedgehog.Metadata.Sqlite`, and a thin local-cluster harness.
 - Storage-agent durability cannot wait for network behavior; manifest and journal crash tests are a beta blocker.
 - Transfer classes and object size limits are now part of capacity and repair correctness, not tuning polish.
 
@@ -437,7 +437,7 @@ Next decision:
 Accepted design:
 - The v1 threat model is captured in [p2p-nosql-threat-model.md](p2p-nosql-threat-model.md).
 - Threat rows now map actor, capability, target, trust boundary, prevention control, detection signal, and recovery/runbook.
-- The table covers compromised heads, malicious storage agents, stolen admin keys, leaked invitations, stale cached authority, metadata privacy leakage, false capacity reports, replayed envelopes, manifest corruption, abusive tenants, metadata operator errors, and Rust async cancellation bugs.
+- The table covers compromised heads, malicious storage agents, stolen admin keys, leaked invitations, stale cached authority, metadata privacy leakage, false capacity reports, replayed envelopes, manifest corruption, abusive tenants, metadata operator errors, and .NET async cancellation bugs.
 
 Risk review:
 - The first service work must not allow head-local authority decisions. SQLite-backed metadata workflows remain the only path for placement, leases, revocation, invitations, and write visibility.
@@ -463,7 +463,7 @@ Risk review:
 - Recovery needs hard gates: migrations current, invariant checks passed, outbox lag bounded, audit append working, and caches rebuilt from the metadata store.
 
 Next decision:
-- Define the Rust crate layout and first scaffold package before implementation begins: workspace members, ownership boundaries, feature flags, shared error/ID types, migration embedding, deterministic CBOR vector location, storage-agent manifest crash-test boundary, and local-cluster harness ownership.
+- Define the .NET project layout and first scaffold package before implementation begins: solution members, ownership boundaries, MSBuild properties, shared error/ID types, migration embedding, deterministic CBOR vector location, storage-agent manifest crash-test boundary, and local-cluster harness ownership.
 
 ## Research Loop Rule
 
@@ -491,8 +491,8 @@ This keeps the project moving like a campaign, not a council that never leaves R
 
 Accepted design:
 - `p2p-nosql-scaffold-contract.md` and `p2p-nosql-implementation-contract.md` have been reconciled on the same lower-case canonical implementation labels.
-- Until Rust code exists, the scaffold contract is the seed source for the validator. Once `hedgehog-types` lands, label metadata in that crate becomes the executable source of truth.
-- `cargo xtask validate-scaffold-contract` is the first validation command. The earlier `validate-labels` wording is retired.
+- Until .NET code exists, the scaffold contract is the seed source for the validator. Once `Hedgehog.Types` lands, label metadata in that project becomes the executable source of truth.
+- `dotnet run --project tools/Hedgehog.Xtask -- validate-scaffold-contract` is the first validation command. The earlier `validate-labels` wording is retired.
 
 Next decision:
-- Define the `hedgehog-types` label metadata API and the `xtask` validator seed format, then make the validator fail on drift between docs, Rust enums, SQL values, metrics, dashboards, admin filters, and fixtures.
+- Define the `Hedgehog.Types` label metadata API and the `Hedgehog.Xtask` validator seed format, then make the validator fail on drift between docs, .NET enums, SQL values, metrics, dashboards, admin filters, and fixtures.
