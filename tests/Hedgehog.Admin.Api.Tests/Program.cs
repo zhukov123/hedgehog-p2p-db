@@ -66,6 +66,11 @@ static void NodeActionsUpdateState(AdminRepository repository)
     var active = repository.GetNode("node-a") ?? throw new InvalidOperationException("node-a missing");
     Equal("active", active.State);
     Equal(true, active.AcceptingWrites);
+
+    repository.ApplyAction("node", "node-a", "revoke", new ActionRequestDto("admin-test", "revoke test"));
+    var revoked = repository.GetNode("node-a") ?? throw new InvalidOperationException("node-a missing");
+    Equal("revoked", revoked.State);
+    Equal(false, revoked.AcceptingWrites);
 }
 
 static void RepairActionsUseCanonicalStates(AdminRepository repository)
@@ -87,6 +92,10 @@ static void RecoveryGateActionsRequireApprovals(AdminRepository repository)
     repository.ApplyAction("recovery-gate", gate.GateId, "approve", new ActionRequestDto("admin-test", "approve test"));
     var approved = repository.GetRecoveryGates().Single(item => item.GateId == gate.GateId);
     Equal(approvals + 1, approved.Approvals);
+
+    repository.ApplyAction("recovery-gate", gate.GateId, "acknowledge", new ActionRequestDto("admin-test", "acknowledge test"));
+    var acknowledged = repository.GetRecoveryGates().Single(item => item.GateId == gate.GateId);
+    Equal("closed", acknowledged.State);
 }
 
 static async Task AdminEndpointsServeOperationalContractsAsync()
@@ -146,6 +155,31 @@ static async Task AdminEndpointsServeOperationalContractsAsync()
     var action = await actionResponse.Content.ReadFromJsonAsync<ActionResultDto>()
         ?? throw new InvalidOperationException("cluster action endpoint returned no payload");
     Equal("accepted", action.Result);
+
+    var badAction = await client.PostAsJsonAsync(
+        "/admin/v1/nodes/node-a/actions/drain",
+        new ActionRequestDto("", ""));
+    Equal(HttpStatusCode.BadRequest, badAction.StatusCode);
+
+    var quarantineResponse = await client.PostAsJsonAsync(
+        "/admin/v1/nodes/node-a/actions/quarantine",
+        new ActionRequestDto("admin-test", "endpoint quarantine", "endpoint-quarantine"));
+    Equal(HttpStatusCode.OK, quarantineResponse.StatusCode);
+
+    var revokeResponse = await client.PostAsJsonAsync(
+        "/admin/v1/nodes/node-b/actions/revoke",
+        new ActionRequestDto("admin-test", "endpoint revoke", "endpoint-revoke"));
+    Equal(HttpStatusCode.OK, revokeResponse.StatusCode);
+
+    var retryResponse = await client.PostAsJsonAsync(
+        "/admin/v1/repair/jobs/repair-30291/actions/retry",
+        new ActionRequestDto("admin-test", "endpoint retry", "endpoint-retry"));
+    Equal(HttpStatusCode.OK, retryResponse.StatusCode);
+
+    var acknowledgeResponse = await client.PostAsJsonAsync(
+        "/admin/v1/recovery/gates/gate-capacity-emergency/actions/acknowledge",
+        new ActionRequestDto("admin-test", "endpoint acknowledge", "endpoint-acknowledge"));
+    Equal(HttpStatusCode.OK, acknowledgeResponse.StatusCode);
 
     var paused = await client.GetFromJsonAsync<ClusterStatusDto>("/admin/v1/cluster/status")
         ?? throw new InvalidOperationException("paused cluster status endpoint returned no payload");

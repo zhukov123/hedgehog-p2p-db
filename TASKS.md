@@ -27,12 +27,12 @@ Admin is not a later dashboard. For v1, admin status, repair visibility, audit r
   - [x] `GET /admin/repair/jobs`
   - [x] `GET /admin/audit`
   - [x] `GET /admin/recovery/gates`
-- [ ] Add guarded admin mutation endpoint shapes:
-  - [ ] quarantine node
-  - [ ] drain node
-  - [ ] revoke node
-  - [ ] retry repair job
-  - [ ] acknowledge recovery gate
+- [x] Add guarded admin mutation endpoint shapes:
+  - [x] quarantine node
+  - [x] drain node
+  - [x] revoke node
+  - [x] retry repair job
+  - [x] acknowledge recovery gate
 - [x] Build dense operator UI views:
   - [x] overview
   - [x] nodes and capacity

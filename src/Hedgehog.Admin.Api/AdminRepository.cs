@@ -203,6 +203,9 @@ public sealed class AdminRepository
                 case ("node", "quarantine"):
                     UpdateNode(targetId, node => node with { AcceptingWrites = false, DrainState = "quarantined", State = "quarantined" });
                     break;
+                case ("node", "revoke"):
+                    UpdateNode(targetId, node => node with { AcceptingWrites = false, DrainState = "revoked", State = "revoked" });
+                    break;
                 case ("object", "block-gc"):
                     UpdateObject(targetId, item => item with { GcBlocked = true, UpdatedAt = now });
                     break;
@@ -223,6 +226,9 @@ public sealed class AdminRepository
                     break;
                 case ("recovery-gate", "approve"):
                     UpdateRecoveryGate(targetId, gate => gate with { Approvals = Math.Min(gate.RequiredApprovals, gate.Approvals + 1) });
+                    break;
+                case ("recovery-gate", "acknowledge"):
+                    UpdateRecoveryGate(targetId, gate => gate with { State = gate.Approvals >= gate.RequiredApprovals ? "closed" : "acknowledged" });
                     break;
                 case ("recovery-gate", "close"):
                     UpdateRecoveryGate(targetId, gate => gate with { State = "closed", Approvals = gate.RequiredApprovals });

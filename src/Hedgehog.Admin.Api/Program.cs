@@ -51,7 +51,7 @@ admin.MapPost("/cluster/actions/{action}", (
     string action,
     ActionRequestDto request,
     AdminRepository repository) =>
-    Results.Ok(repository.ApplyAction("cluster", "cluster", action, request)));
+    ApplyGuardedAction(repository, "cluster", "cluster", action, request));
 
 admin.MapGet("/nodes", (AdminRepository repository) =>
     Results.Ok(repository.GetNodes()));
@@ -69,7 +69,13 @@ admin.MapPost("/nodes/{nodeId}/actions/{action}", (
     string action,
     ActionRequestDto request,
     AdminRepository repository) =>
-    Results.Ok(repository.ApplyAction("node", nodeId, action, request)));
+    ApplyGuardedAction(repository, "node", nodeId, action, request));
+adminCompat.MapPost("/nodes/{nodeId}/actions/{action}", (
+    string nodeId,
+    string action,
+    ActionRequestDto request,
+    AdminRepository repository) =>
+    ApplyGuardedAction(repository, "node", nodeId, action, request));
 
 admin.MapGet("/capacity", (AdminRepository repository) =>
     Results.Ok(repository.GetCapacity()));
@@ -81,7 +87,7 @@ admin.MapPost("/capacity/scopes/{scopeId}/actions/{action}", (
     string action,
     ActionRequestDto request,
     AdminRepository repository) =>
-    Results.Ok(repository.ApplyAction("capacity", scopeId, action, request)));
+    ApplyGuardedAction(repository, "capacity", scopeId, action, request));
 
 admin.MapGet("/objects", (
     string? tenantId,
@@ -114,7 +120,7 @@ admin.MapPost("/objects/{versionId}/actions/{action}", (
     string action,
     ActionRequestDto request,
     AdminRepository repository) =>
-    Results.Ok(repository.ApplyAction("object", versionId, action, request)));
+    ApplyGuardedAction(repository, "object", versionId, action, request));
 
 admin.MapGet("/repair/queue", (
     string? state,
@@ -137,14 +143,20 @@ admin.MapPost("/repair/jobs/{jobId}/actions/{action}", (
     string action,
     ActionRequestDto request,
     AdminRepository repository) =>
-    Results.Ok(repository.ApplyAction("repair-job", jobId, action, request)));
+    ApplyGuardedAction(repository, "repair-job", jobId, action, request));
+adminCompat.MapPost("/repair/jobs/{jobId}/actions/{action}", (
+    string jobId,
+    string action,
+    ActionRequestDto request,
+    AdminRepository repository) =>
+    ApplyGuardedAction(repository, "repair-job", jobId, action, request));
 
 admin.MapPost("/repair/classes/{repairClass}/actions/{action}", (
     string repairClass,
     string action,
     ActionRequestDto request,
     AdminRepository repository) =>
-    Results.Ok(repository.ApplyAction("repair-class", repairClass, action, request)));
+    ApplyGuardedAction(repository, "repair-class", repairClass, action, request));
 
 admin.MapGet("/audit/events", (
     string? actorId,
@@ -178,8 +190,32 @@ admin.MapPost("/recovery/gates/{gateId}/actions/{action}", (
     string action,
     ActionRequestDto request,
     AdminRepository repository) =>
-    Results.Ok(repository.ApplyAction("recovery-gate", gateId, action, request)));
+    ApplyGuardedAction(repository, "recovery-gate", gateId, action, request));
+adminCompat.MapPost("/recovery/gates/{gateId}/actions/{action}", (
+    string gateId,
+    string action,
+    ActionRequestDto request,
+    AdminRepository repository) =>
+    ApplyGuardedAction(repository, "recovery-gate", gateId, action, request));
 
 app.MapGet("/", () => Results.Redirect("/admin/v1"));
 
 app.Run();
+
+static IResult ApplyGuardedAction(
+    AdminRepository repository,
+    string targetType,
+    string targetId,
+    string action,
+    ActionRequestDto request)
+{
+    if (string.IsNullOrWhiteSpace(request.ActorId) || string.IsNullOrWhiteSpace(request.Reason))
+    {
+        return Results.BadRequest(new
+        {
+            error = "admin action requires actorId and reason",
+        });
+    }
+
+    return Results.Ok(repository.ApplyAction(targetType, targetId, action, request));
+}
