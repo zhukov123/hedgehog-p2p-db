@@ -1,9 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <UseAppHost>false</UseAppHost>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="../../src/Hedgehog.Types/Hedgehog.Types.csproj" />
+    <ProjectReference Include="../../src/Hedgehog.Metadata.Core/Hedgehog.Metadata.Core.csproj" />
   </ItemGroup>
 </Project>

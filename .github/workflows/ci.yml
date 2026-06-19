@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  build:
+    name: Build and Validate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Restore
+        run: dotnet restore Hedgehog.sln
+
+      - name: Build
+        run: dotnet build Hedgehog.sln --no-restore
+
+      - name: Test Metadata Core
+        run: dotnet run --project tests/Hedgehog.Metadata.Core.Tests --no-build
+
+      - name: Test Metadata SQLite
+        run: dotnet run --project tests/Hedgehog.Metadata.Sqlite.Tests --no-build
+
+      - name: Test Admin API
+        run: dotnet run --project tests/Hedgehog.Admin.Api.Tests --no-build
+
+      - name: Validate Scaffold Contract
+        run: dotnet run --project tools/Hedgehog.Xtask -- validate-scaffold-contract

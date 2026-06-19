@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hedgehog Admin</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>Hedgehog Admin</h1>
+      <p id="cluster-line">Cluster status loading</p>
+    </div>
+    <form id="api-form" class="api-form">
+      <label for="api-base">API</label>
+      <input id="api-base" name="api-base" autocomplete="off">
+      <button type="submit">Reload</button>
+    </form>
+  </header>
+
+  <main class="layout">
+    <nav class="rail" aria-label="Admin sections">
+      <a href="#cluster">Cluster</a>
+      <a href="#nodes">Nodes</a>
+      <a href="#capacity">Capacity</a>
+      <a href="#objects">Objects</a>
+      <a href="#repair">Repair</a>
+      <a href="#gates">Recovery Gates</a>
+      <a href="#audit">Audit</a>
+    </nav>
+
+    <section class="content">
+      <section id="cluster" class="band">
+        <div class="section-head">
+          <h2>Cluster</h2>
+          <div class="actions">
+            <button data-action="cluster:pause-writes">Pause writes</button>
+            <button data-action="cluster:resume-writes">Resume writes</button>
+            <button data-action="cluster:read-only">Read only</button>
+            <button data-action="cluster:health-sweep">Health sweep</button>
+          </div>
+        </div>
+        <div id="cluster-summary" class="summary-grid"></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Signal</th><th>State</th><th>Value</th><th>Detail</th></tr>
+            </thead>
+            <tbody id="cluster-signals"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="nodes" class="band">
+        <div class="section-head">
+          <h2>Nodes</h2>
+          <div class="actions">
+            <button data-reload>Refresh</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Node</th><th>Region</th><th>State</th><th>Heartbeat</th><th>Writes</th><th>Drain</th><th>Used</th><th>Replicas</th><th>Actions</th></tr>
+            </thead>
+            <tbody id="nodes-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="capacity" class="band">
+        <div class="section-head">
+          <h2>Capacity</h2>
+          <div class="actions">
+            <button data-reload>Refresh</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Scope</th><th>Pressure</th><th>Usable</th><th>Committed</th><th>Reserved</th><th>Free</th><th>Reserve</th><th>Frozen</th><th>Actions</th></tr>
+            </thead>
+            <tbody id="capacity-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="objects" class="band">
+        <div class="section-head">
+          <h2>Objects</h2>
+          <form id="object-filter" class="filters">
+            <input name="tenantId" placeholder="tenant">
+            <input name="datasetId" placeholder="dataset">
+            <input name="state" placeholder="state">
+            <input name="q" placeholder="object, version, hash">
+            <button type="submit">Filter</button>
+          </form>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Tenant</th><th>Dataset</th><th>Object</th><th>Version</th><th>State</th><th>Replicas</th><th>Epochs</th><th>GC</th><th>Actions</th></tr>
+            </thead>
+            <tbody id="objects-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="repair" class="band">
+        <div class="section-head">
+          <h2>Repair Queue</h2>
+          <form id="repair-filter" class="filters">
+            <input name="state" placeholder="state">
+            <input name="priority" placeholder="priority">
+            <button type="submit">Filter</button>
+          </form>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Job</th><th>Class</th><th>Priority</th><th>State</th><th>Reason</th><th>Target</th><th>Bytes</th><th>Age</th><th>Actions</th></tr>
+            </thead>
+            <tbody id="repair-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="gates" class="band">
+        <div class="section-head">
+          <h2>Recovery Gates</h2>
+          <div class="actions">
+            <button data-reload>Refresh</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Gate</th><th>State</th><th>Severity</th><th>Reason</th><th>Approvals</th><th>Blocks</th><th>Allowed</th><th>Actions</th></tr>
+            </thead>
+            <tbody id="gates-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="audit" class="band">
+        <div class="section-head">
+          <h2>Audit</h2>
+          <form id="audit-filter" class="filters">
+            <input name="actorId" placeholder="actor">
+            <input name="action" placeholder="action">
+            <input name="targetType" placeholder="target type">
+            <input name="result" placeholder="result">
+            <button type="submit">Filter</button>
+          </form>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Time</th><th>Actor</th><th>Action</th><th>Target</th><th>Result</th><th>Reason</th><th>Request</th></tr>
+            </thead>
+            <tbody id="audit-body"></tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script src="/app.js"></script>
+</body>
+</html>

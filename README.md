@@ -21,6 +21,7 @@ Start here:
 - [Implementation roadmap](p2p-nosql-implementation-roadmap.md)
 - [SQLite-first SQL schema plan](p2p-object-store-sqlite-schema-plan.md)
 - [Deferred v2/v3 design](p2p-object-store-deferred-design.md)
+- [V1 task list](TASKS.md)
 
 Historical NoSQL/database-oriented documents are retained for context only. They are not v1-alpha implementation authority unless a newer contract explicitly adopts a feature.
 

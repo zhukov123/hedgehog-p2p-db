@@ -1,9 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <UseAppHost>false</UseAppHost>
   </PropertyGroup>
+
   <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Hedgehog.Metadata.Sqlite/Hedgehog.Metadata.Sqlite.csproj" />
     <ProjectReference Include="../../src/Hedgehog.Types/Hedgehog.Types.csproj" />
   </ItemGroup>
 </Project>

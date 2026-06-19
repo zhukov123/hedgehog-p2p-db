@@ -1,5 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
+    <EmbeddedResource Include="Migrations/*.sql" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="../Hedgehog.Metadata.Core/Hedgehog.Metadata.Core.csproj" />
     <ProjectReference Include="../Hedgehog.Types/Hedgehog.Types.csproj" />
   </ItemGroup>
