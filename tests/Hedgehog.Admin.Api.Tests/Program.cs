@@ -101,10 +101,42 @@ static async Task AdminEndpointsServeOperationalContractsAsync()
     Equal("hedgehog-local", status.ClusterId);
     True(status.Signals.Any(signal => signal.Name == "repair"), "status endpoint should expose repair signal");
 
+    var canonicalStatus = await client.GetFromJsonAsync<ClusterStatusDto>("/admin/v1/status")
+        ?? throw new InvalidOperationException("canonical status endpoint returned no payload");
+    Equal(status.ClusterId, canonicalStatus.ClusterId);
+
+    var compatibilityStatus = await client.GetFromJsonAsync<ClusterStatusDto>("/admin/status")
+        ?? throw new InvalidOperationException("compatibility status endpoint returned no payload");
+    Equal(status.ClusterId, compatibilityStatus.ClusterId);
+
+    var nodes = await client.GetFromJsonAsync<IReadOnlyList<NodeDto>>("/admin/v1/nodes")
+        ?? throw new InvalidOperationException("nodes endpoint returned no payload");
+    True(nodes.Count > 0, "nodes endpoint should expose storage agents");
+
+    var capacity = await client.GetFromJsonAsync<IReadOnlyList<CapacityScopeDto>>("/admin/v1/capacity")
+        ?? throw new InvalidOperationException("capacity endpoint returned no payload");
+    True(capacity.Count > 0, "capacity endpoint should expose capacity scopes");
+
     var objects = await client.GetFromJsonAsync<IReadOnlyList<ObjectVersionDto>>("/admin/v1/objects?state=under_replicated")
         ?? throw new InvalidOperationException("objects endpoint returned no payload");
     Equal(1, objects.Count);
     True(objects[0].ObjectId.StartsWith("obj_", StringComparison.Ordinal), "objects endpoint should expose opaque object ids");
+
+    var objectDetail = await client.GetFromJsonAsync<ObjectVersionDto>($"/admin/v1/objects/{objects[0].ObjectId}")
+        ?? throw new InvalidOperationException("object detail endpoint returned no payload");
+    Equal(objects[0].ObjectId, objectDetail.ObjectId);
+
+    var repairJobs = await client.GetFromJsonAsync<IReadOnlyList<RepairJobDto>>("/admin/v1/repair/jobs")
+        ?? throw new InvalidOperationException("repair jobs endpoint returned no payload");
+    True(repairJobs.Count > 0, "repair jobs endpoint should expose repair queue");
+
+    var audit = await client.GetFromJsonAsync<IReadOnlyList<AuditEventDto>>("/admin/v1/audit")
+        ?? throw new InvalidOperationException("audit endpoint returned no payload");
+    True(audit.Count > 0, "audit endpoint should expose audit events");
+
+    var gates = await client.GetFromJsonAsync<IReadOnlyList<RecoveryGateDto>>("/admin/v1/recovery/gates")
+        ?? throw new InvalidOperationException("recovery gates endpoint returned no payload");
+    True(gates.Count > 0, "recovery gates endpoint should expose recovery gates");
 
     var actionResponse = await client.PostAsJsonAsync(
         "/admin/v1/cluster/actions/pause-writes",

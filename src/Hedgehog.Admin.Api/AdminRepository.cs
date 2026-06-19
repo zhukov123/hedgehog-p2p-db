@@ -128,11 +128,13 @@ public sealed class AdminRepository
         }
     }
 
-    public ObjectVersionDto? GetObjectVersion(string versionId)
+    public ObjectVersionDto? GetObject(string objectIdOrVersionId)
     {
         lock (_gate)
         {
-            return _objects.FirstOrDefault(item => item.VersionId.Equals(versionId, StringComparison.OrdinalIgnoreCase));
+            return _objects.FirstOrDefault(item =>
+                item.ObjectId.Equals(objectIdOrVersionId, StringComparison.OrdinalIgnoreCase)
+                || item.VersionId.Equals(objectIdOrVersionId, StringComparison.OrdinalIgnoreCase));
         }
     }
 
@@ -263,9 +265,11 @@ public sealed class AdminRepository
         }
     }
 
-    private void UpdateObject(string versionId, Func<ObjectVersionDto, ObjectVersionDto> update)
+    private void UpdateObject(string objectIdOrVersionId, Func<ObjectVersionDto, ObjectVersionDto> update)
     {
-        var index = _objects.FindIndex(item => item.VersionId.Equals(versionId, StringComparison.OrdinalIgnoreCase));
+        var index = _objects.FindIndex(item =>
+            item.ObjectId.Equals(objectIdOrVersionId, StringComparison.OrdinalIgnoreCase)
+            || item.VersionId.Equals(objectIdOrVersionId, StringComparison.OrdinalIgnoreCase));
         if (index >= 0)
         {
             _objects[index] = update(_objects[index]);

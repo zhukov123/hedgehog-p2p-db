@@ -18,15 +18,15 @@ Admin is not a later dashboard. For v1, admin status, repair visibility, audit r
 - [x] Create `Hedgehog.Admin.Api`.
 - [x] Create `Hedgehog.Admin.Ui`.
 - [x] Define admin DTOs for cluster status, nodes, capacity, objects, replicas, repair jobs, audit events, and recovery gates.
-- [ ] Add admin read endpoints:
-  - [ ] `GET /admin/status`
-  - [ ] `GET /admin/nodes`
-  - [ ] `GET /admin/capacity`
-  - [ ] `GET /admin/objects`
-  - [ ] `GET /admin/objects/{objectId}`
-  - [ ] `GET /admin/repair/jobs`
-  - [ ] `GET /admin/audit`
-  - [ ] `GET /admin/recovery/gates`
+- [x] Add admin read endpoints:
+  - [x] `GET /admin/status`
+  - [x] `GET /admin/nodes`
+  - [x] `GET /admin/capacity`
+  - [x] `GET /admin/objects`
+  - [x] `GET /admin/objects/{objectId}`
+  - [x] `GET /admin/repair/jobs`
+  - [x] `GET /admin/audit`
+  - [x] `GET /admin/recovery/gates`
 - [ ] Add guarded admin mutation endpoint shapes:
   - [ ] quarantine node
   - [ ] drain node
