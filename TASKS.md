@@ -11,7 +11,7 @@ Admin is not a later dashboard. For v1, admin status, repair visibility, audit r
 - [x] Scaffold validator runs through `Hedgehog.Xtask`.
 - [x] Add CI for `dotnet build` and scaffold validation.
 - [x] Add first fixture manifest for crash, recovery, capacity, admin, and repair scenarios.
-- [ ] Add project layout contract for all v1 projects.
+- [x] Add project layout contract for all v1 projects.
 
 ## Milestone 1: Admin-First Control Plane Skeleton
 

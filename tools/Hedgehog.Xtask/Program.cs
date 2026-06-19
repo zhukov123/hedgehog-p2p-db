@@ -88,6 +88,7 @@ internal sealed class ScaffoldContractValidator(string root, bool allowMissingSc
         "p2p-object-store-sqlite-schema-plan.md",
         "p2p-nosql-implementation-contract.md",
         "p2p-nosql-scaffold-contract.md",
+        "docs/project-layout-v1.md",
     ];
 
     private static readonly (string Path, string Phrase)[] RequiredPhrases =
@@ -96,6 +97,7 @@ internal sealed class ScaffoldContractValidator(string root, bool allowMissingSc
         ("p2p-object-store-sqlite-schema-plan.md", "object_lookup_hash blob not null"),
         ("p2p-nosql-implementation-contract.md", "Use `Microsoft.Data.Sqlite` with SQLite for v1-alpha."),
         ("p2p-nosql-scaffold-contract-part-01.md", "Hedgehog.Metadata.Sqlite"),
+        ("docs/project-layout-v1.md", "V1 projects are allowed only under `src/`, `tests/`, and `tools/`."),
     ];
 
     private static readonly string[] QuarantineScanFiles =
@@ -172,6 +174,31 @@ internal sealed class ScaffoldContractValidator(string root, bool allowMissingSc
             ]),
     ];
 
+    private static readonly RequiredProject[] ProjectLayout =
+    [
+        new("Hedgehog.Types", "src/Hedgehog.Types/Hedgehog.Types.csproj", true),
+        new("Hedgehog.Crypto", "src/Hedgehog.Crypto/Hedgehog.Crypto.csproj", true),
+        new("Hedgehog.Metadata.Core", "src/Hedgehog.Metadata.Core/Hedgehog.Metadata.Core.csproj", true),
+        new("Hedgehog.Metadata.Sqlite", "src/Hedgehog.Metadata.Sqlite/Hedgehog.Metadata.Sqlite.csproj", true),
+        new("Hedgehog.Admin.Api", "src/Hedgehog.Admin.Api/Hedgehog.Admin.Api.csproj", true),
+        new("Hedgehog.Admin.Ui", "src/Hedgehog.Admin.Ui/Hedgehog.Admin.Ui.csproj", true),
+        new("Hedgehog.Head", "src/Hedgehog.Head/Hedgehog.Head.csproj", false),
+        new("Hedgehog.Agent.Core", "src/Hedgehog.Agent.Core/Hedgehog.Agent.Core.csproj", false),
+        new("Hedgehog.Agent.Store", "src/Hedgehog.Agent.Store/Hedgehog.Agent.Store.csproj", false),
+        new("Hedgehog.StorageAgent", "src/Hedgehog.StorageAgent/Hedgehog.StorageAgent.csproj", false),
+        new("Hedgehog.Repair", "src/Hedgehog.Repair/Hedgehog.Repair.csproj", false),
+        new("Hedgehog.Client", "src/Hedgehog.Client/Hedgehog.Client.csproj", false),
+        new("Hedgehog.Metadata.Core.Tests", "tests/Hedgehog.Metadata.Core.Tests/Hedgehog.Metadata.Core.Tests.csproj", true),
+        new("Hedgehog.Metadata.Sqlite.Tests", "tests/Hedgehog.Metadata.Sqlite.Tests/Hedgehog.Metadata.Sqlite.Tests.csproj", true),
+        new("Hedgehog.Admin.Api.Tests", "tests/Hedgehog.Admin.Api.Tests/Hedgehog.Admin.Api.Tests.csproj", true),
+        new("Hedgehog.Head.Tests", "tests/Hedgehog.Head.Tests/Hedgehog.Head.Tests.csproj", false),
+        new("Hedgehog.StorageAgent.Tests", "tests/Hedgehog.StorageAgent.Tests/Hedgehog.StorageAgent.Tests.csproj", false),
+        new("Hedgehog.Repair.Tests", "tests/Hedgehog.Repair.Tests/Hedgehog.Repair.Tests.csproj", false),
+        new("Hedgehog.Client.Tests", "tests/Hedgehog.Client.Tests/Hedgehog.Client.Tests.csproj", false),
+        new("Hedgehog.LocalRuntime.Tests", "tests/Hedgehog.LocalRuntime.Tests/Hedgehog.LocalRuntime.Tests.csproj", false),
+        new("Hedgehog.Xtask", "tools/Hedgehog.Xtask/Hedgehog.Xtask.csproj", true),
+    ];
+
     private static readonly Regex SlugPattern = new("^[a-z0-9_]+$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     public IReadOnlyList<ValidationFailure> Validate()
@@ -192,6 +219,7 @@ internal sealed class ScaffoldContractValidator(string root, bool allowMissingSc
 
         ValidateAdminSurfaces(failures);
         ValidateMigrations(failures);
+        ValidateProjectLayout(failures);
 
         return failures
             .OrderBy(failure => failure.CheckId, StringComparer.Ordinal)
@@ -458,6 +486,55 @@ internal sealed class ScaffoldContractValidator(string root, bool allowMissingSc
         }
     }
 
+    private void ValidateProjectLayout(List<ValidationFailure> failures)
+    {
+        var contractPath = "docs/project-layout-v1.md";
+        var contractFullPath = FullPath(contractPath);
+        var contractText = File.Exists(contractFullPath) ? File.ReadAllText(contractFullPath) : string.Empty;
+        var knownProjectPaths = ProjectLayout.Select(project => project.Path).ToHashSet(StringComparer.Ordinal);
+
+        foreach (var project in ProjectLayout)
+        {
+            if (!contractText.Contains(project.Name, StringComparison.Ordinal)
+                || !contractText.Contains(project.Path, StringComparison.Ordinal))
+            {
+                failures.Add(new("projects.layout", $"layout contract must declare {project.Name} at {project.Path}", contractPath));
+            }
+
+            if (project.MustExist && !File.Exists(FullPath(project.Path)))
+            {
+                failures.Add(new("projects.layout", $"required project is missing: {project.Path}", project.Path));
+            }
+        }
+
+        foreach (var projectFile in EnumerateProjectFiles())
+        {
+            if (!knownProjectPaths.Contains(projectFile))
+            {
+                failures.Add(new("projects.layout", $"project file is outside the v1 layout contract: {projectFile}", projectFile));
+            }
+        }
+    }
+
+    private IEnumerable<string> EnumerateProjectFiles()
+    {
+        foreach (var directory in new[] { "src", "tests", "tools" })
+        {
+            var fullDirectory = FullPath(directory);
+            if (!Directory.Exists(fullDirectory))
+            {
+                continue;
+            }
+
+            foreach (var file in Directory.EnumerateFiles(fullDirectory, "*.csproj", SearchOption.AllDirectories).Order(StringComparer.Ordinal))
+            {
+                yield return Path.GetRelativePath(root, file)
+                    .Replace(Path.DirectorySeparatorChar, '/')
+                    .Replace(Path.AltDirectorySeparatorChar, '/');
+            }
+        }
+    }
+
     private IEnumerable<string> EnumerateOptionalScanFiles(string directory, string pattern)
     {
         var fullDirectory = FullPath(directory);
@@ -666,6 +743,8 @@ internal sealed record RequiredFixture(string Slug, string Name);
 internal sealed record RequiredTask(string Slug, string Name);
 
 internal sealed record RequiredSurface(string Name, IReadOnlyList<string> PathCandidates);
+
+internal sealed record RequiredProject(string Name, string Path, bool MustExist);
 
 internal sealed record ValidationFailure(string CheckId, string Message, string? Path = null)
 {
