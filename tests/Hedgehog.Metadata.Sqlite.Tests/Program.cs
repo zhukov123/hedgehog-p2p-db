@@ -25,6 +25,7 @@ Equal(6, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM __hedgehog_schem
 await SeedAuthorityAsync(connection);
 await WriteLifecyclePersistsCoherentMetadataAsync(connection);
 await DeleteMarkerPersistsTombstoneAsync(connection);
+await RemainingWorkflowSetPersistsCoherentMetadataAsync(connection);
 await AssertForeignKeyCheckCleanAsync(connection);
 
 Console.WriteLine("Hedgehog.Metadata.Sqlite.Tests passed.");
@@ -226,6 +227,109 @@ static async Task DeleteMarkerPersistsTombstoneAsync(SqliteConnection connection
     Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM object_versions WHERE version_id = 'delete-version-a' AND state = 'delete_marker';"));
     Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM objects WHERE object_id = 'object-a' AND current_version_id = 'delete-version-a' AND state = 'delete_marker';"));
     Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM tombstones WHERE object_id = 'object-a' AND version_id = 'delete-version-a' AND delete_epoch = 1;"));
+}
+
+static async Task RemainingWorkflowSetPersistsCoherentMetadataAsync(SqliteConnection connection)
+{
+    var workflowStore = SqliteMetadataAuthority.CreateWorkflowStore();
+    var now = new DateTimeOffset(2026, 1, 2, 5, 6, 7, TimeSpan.Zero);
+
+    var capacity = await workflowStore.RecordCapacityReportAsync(
+        connection,
+        new SqliteCapacityReportRequest(
+            "node-a",
+            "pressure",
+            1_000_000,
+            700_000,
+            120_000,
+            180_000,
+            now,
+            "idem-capacity-node-a",
+            [1, 1, 2, 3]));
+
+    Equal("pressure", capacity.State);
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM capacity_reports WHERE node_id = 'node-a' AND capacity_pressure = 'pressure';"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM nodes WHERE node_id = 'node-a' AND capacity_pressure = 'pressure' AND reserved_bytes = 120000;"));
+
+    var lease = await workflowStore.LeaseRepairAsync(
+        connection,
+        new SqliteLeaseRepairRequest(
+            "tenant-a",
+            "dataset-a",
+            "object-a",
+            "version-a",
+            "repair-job-a",
+            "replica-a",
+            "repair-lease-a",
+            "node-b",
+            "under_replicated",
+            100,
+            "below required replica count",
+            now.AddSeconds(1),
+            TimeSpan.FromMinutes(5),
+            "idem-lease-repair-a"));
+
+    Equal("leased", lease.State);
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM repair_jobs WHERE job_id = 'repair-job-a' AND state = 'leased';"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM leases WHERE lease_id = 'repair-lease-a' AND state = 'issued';"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM object_versions WHERE version_id = 'version-a' AND state = 'under_replicated';"));
+
+    await workflowStore.CreateWriteIntentAsync(
+        connection,
+        new SqliteCreateWriteIntentRequest(
+            "tenant-a",
+            "dataset-a",
+            "object-b",
+            [4, 3, 2, 1],
+            "lookup-key-a",
+            "version-b",
+            1,
+            "actor-a",
+            [6, 7, 8, 9],
+            20,
+            "xchacha20-poly1305",
+            "data-key-a",
+            1,
+            1,
+            0,
+            now.AddSeconds(2),
+            TimeSpan.FromMinutes(1),
+            "idem-create-object-b-v1",
+            [
+                new("reservation-c", "replica-c", "node-a", 20, 201),
+            ]));
+
+    var expired = await workflowStore.ExpireReservationAsync(
+        connection,
+        new SqliteExpireReservationRequest(
+            "tenant-a",
+            "dataset-a",
+            "object-b",
+            "version-b",
+            "reservation-c",
+            now.AddMinutes(2),
+            "idem-expire-reservation-c"));
+
+    Equal("expired", expired.State);
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM capacity_reservations WHERE reservation_id = 'reservation-c' AND state = 'expired';"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM replicas WHERE replica_id = 'replica-c' AND state = 'stale';"));
+
+    var cleanup = await workflowStore.CleanupConversionAsync(
+        connection,
+        new SqliteCleanupConversionRequest(
+            "tenant-a",
+            "dataset-a",
+            "object-b",
+            "version-b",
+            "reservation-c",
+            "replica-c",
+            now.AddMinutes(3),
+            RequiresCleanup: true,
+            "idem-cleanup-reservation-c"));
+
+    Equal("failed_cleanup_required", cleanup.State);
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM capacity_reservations WHERE reservation_id = 'reservation-c' AND state = 'failed_cleanup_required';"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM replicas WHERE replica_id = 'replica-c' AND state = 'delete_pending';"));
 }
 
 static async Task<int> ScalarIntAsync(SqliteConnection connection, string sql)

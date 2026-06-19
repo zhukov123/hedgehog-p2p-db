@@ -682,6 +682,465 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
         }
     }
 
+    public async Task<SqliteWorkflowResult> LeaseRepairAsync(
+        IDbConnection connection,
+        SqliteLeaseRepairRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateLeaseRepair(request);
+        var db = RequireDbConnection(connection);
+        await EnsureOpenAsync(db, cancellationToken).ConfigureAwait(false);
+        await using var transaction = await db.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            var replay = await TryBeginIdempotencyAsync(
+                db,
+                transaction,
+                request.IdempotencyKey,
+                request.TenantId,
+                request.DatasetId,
+                MetadataWorkflowNames.LeaseRepair,
+                actorId: null,
+                request,
+                request.LeasedAt,
+                cancellationToken).ConfigureAwait(false);
+
+            if (replay)
+            {
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                return new SqliteWorkflowResult(MetadataWorkflowNames.LeaseRepair, "replayed", Replayed: true, []);
+            }
+
+            await ExecuteAsync(
+                db,
+                transaction,
+                """
+                INSERT INTO leases (
+                    lease_id,
+                    resource_type,
+                    resource_id,
+                    holder_id,
+                    state,
+                    fencing_token,
+                    expires_at_ms,
+                    created_at_ms
+                )
+                VALUES (
+                    @lease_id,
+                    'repair_job',
+                    @job_id,
+                    @holder_id,
+                    'issued',
+                    0,
+                    @expires_at_ms,
+                    @created_at_ms
+                );
+                """,
+                cancellationToken,
+                ("@lease_id", request.LeaseId),
+                ("@job_id", request.JobId),
+                ("@holder_id", request.HolderNodeId),
+                ("@expires_at_ms", ToUnixMs(request.LeasedAt.Add(request.LeaseDuration))),
+                ("@created_at_ms", ToUnixMs(request.LeasedAt))).ConfigureAwait(false);
+
+            await ExecuteAsync(
+                db,
+                transaction,
+                """
+                INSERT INTO repair_jobs (
+                    job_id,
+                    version_id,
+                    replica_id,
+                    kind,
+                    priority,
+                    state,
+                    attempt_count,
+                    lease_id,
+                    not_before_ms,
+                    last_error,
+                    idempotency_key,
+                    created_at_ms,
+                    updated_at_ms
+                )
+                VALUES (
+                    @job_id,
+                    @version_id,
+                    @replica_id,
+                    @kind,
+                    @priority,
+                    'leased',
+                    1,
+                    @lease_id,
+                    @not_before_ms,
+                    NULL,
+                    @idempotency_key,
+                    @created_at_ms,
+                    @created_at_ms
+                );
+                """,
+                cancellationToken,
+                ("@job_id", request.JobId),
+                ("@version_id", request.VersionId),
+                ("@replica_id", request.ReplicaId),
+                ("@kind", request.Kind),
+                ("@priority", request.Priority),
+                ("@lease_id", request.LeaseId),
+                ("@not_before_ms", ToUnixMs(request.LeasedAt)),
+                ("@idempotency_key", request.IdempotencyKey),
+                ("@created_at_ms", ToUnixMs(request.LeasedAt))).ConfigureAwait(false);
+
+            await ExecuteAsync(
+                db,
+                transaction,
+                """
+                UPDATE object_versions
+                SET state = CASE
+                        WHEN state = 'committed' THEN 'under_replicated'
+                        ELSE state
+                    END,
+                    updated_at_ms = @updated_at_ms
+                WHERE version_id = @version_id
+                  AND object_id = @object_id
+                  AND state IN ('committed', 'under_replicated', 'quarantined');
+                """,
+                cancellationToken,
+                ("@version_id", request.VersionId),
+                ("@object_id", request.ObjectId),
+                ("@updated_at_ms", ToUnixMs(request.LeasedAt))).ConfigureAwait(false);
+
+            await AppendAuditAsync(
+                db,
+                transaction,
+                MetadataWorkflowNames.LeaseRepair,
+                "allowed",
+                actorId: null,
+                request.ObjectId,
+                request.VersionId,
+                request.IdempotencyKey,
+                request.LeasedAt,
+                cancellationToken).ConfigureAwait(false);
+
+            await CompleteIdempotencyAsync(db, transaction, request.IdempotencyKey, request.LeasedAt, cancellationToken)
+                .ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return new SqliteWorkflowResult(MetadataWorkflowNames.LeaseRepair, "leased", Replayed: false, ["repair.leased"]);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    public async Task<SqliteWorkflowResult> ExpireReservationAsync(
+        IDbConnection connection,
+        SqliteExpireReservationRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateExpireReservation(request);
+        var db = RequireDbConnection(connection);
+        await EnsureOpenAsync(db, cancellationToken).ConfigureAwait(false);
+        await using var transaction = await db.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            var replay = await TryBeginIdempotencyAsync(
+                db,
+                transaction,
+                request.IdempotencyKey,
+                request.TenantId,
+                request.DatasetId,
+                MetadataWorkflowNames.ExpireReservation,
+                actorId: null,
+                request,
+                request.ExpiredAt,
+                cancellationToken).ConfigureAwait(false);
+
+            if (replay)
+            {
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                return new SqliteWorkflowResult(MetadataWorkflowNames.ExpireReservation, "replayed", Replayed: true, []);
+            }
+
+            var rows = await ExecuteAsync(
+                db,
+                transaction,
+                """
+                UPDATE capacity_reservations
+                SET state = 'expired'
+                WHERE reservation_id = @reservation_id
+                  AND tenant_id = @tenant_id
+                  AND dataset_id = @dataset_id
+                  AND object_id = @object_id
+                  AND version_id = @version_id
+                  AND state IN ('pending', 'reserved', 'streaming', 'finalizing');
+                """,
+                cancellationToken,
+                ("@reservation_id", request.ReservationId),
+                ("@tenant_id", request.TenantId),
+                ("@dataset_id", request.DatasetId),
+                ("@object_id", request.ObjectId),
+                ("@version_id", request.VersionId)).ConfigureAwait(false);
+
+            if (rows != 1)
+            {
+                throw new InvalidOperationException("Reservation was not found in an expirable state.");
+            }
+
+            await ExecuteAsync(
+                db,
+                transaction,
+                """
+                UPDATE replicas
+                SET state = 'stale',
+                    updated_at_ms = @expired_at_ms
+                WHERE replica_id = (
+                    SELECT replica_id
+                    FROM capacity_reservations
+                    WHERE reservation_id = @reservation_id
+                )
+                  AND state IN ('planned', 'streaming', 'verifying');
+                """,
+                cancellationToken,
+                ("@reservation_id", request.ReservationId),
+                ("@expired_at_ms", ToUnixMs(request.ExpiredAt))).ConfigureAwait(false);
+
+            await AppendAuditAsync(
+                db,
+                transaction,
+                MetadataWorkflowNames.ExpireReservation,
+                "allowed",
+                actorId: null,
+                request.ObjectId,
+                request.VersionId,
+                request.IdempotencyKey,
+                request.ExpiredAt,
+                cancellationToken).ConfigureAwait(false);
+
+            await CompleteIdempotencyAsync(db, transaction, request.IdempotencyKey, request.ExpiredAt, cancellationToken)
+                .ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return new SqliteWorkflowResult(MetadataWorkflowNames.ExpireReservation, "expired", Replayed: false, ["reservation.expired"]);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    public async Task<SqliteWorkflowResult> CleanupConversionAsync(
+        IDbConnection connection,
+        SqliteCleanupConversionRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateCleanupConversion(request);
+        var db = RequireDbConnection(connection);
+        await EnsureOpenAsync(db, cancellationToken).ConfigureAwait(false);
+        await using var transaction = await db.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            var replay = await TryBeginIdempotencyAsync(
+                db,
+                transaction,
+                request.IdempotencyKey,
+                request.TenantId,
+                request.DatasetId,
+                MetadataWorkflowNames.CleanupConversion,
+                actorId: null,
+                request,
+                request.ConvertedAt,
+                cancellationToken).ConfigureAwait(false);
+
+            if (replay)
+            {
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                return new SqliteWorkflowResult(MetadataWorkflowNames.CleanupConversion, "replayed", Replayed: true, []);
+            }
+
+            var nextReservationState = request.RequiresCleanup ? "failed_cleanup_required" : "aborted";
+            var nextReplicaState = request.RequiresCleanup ? "delete_pending" : "stale";
+
+            var rows = await ExecuteAsync(
+                db,
+                transaction,
+                """
+                UPDATE capacity_reservations
+                SET state = @state,
+                    cleanup_required_at_ms = @converted_at_ms
+                WHERE reservation_id = @reservation_id
+                  AND tenant_id = @tenant_id
+                  AND dataset_id = @dataset_id
+                  AND object_id = @object_id
+                  AND version_id = @version_id
+                  AND state IN ('expired', 'aborted', 'failed_cleanup_required');
+                """,
+                cancellationToken,
+                ("@state", nextReservationState),
+                ("@converted_at_ms", ToUnixMs(request.ConvertedAt)),
+                ("@reservation_id", request.ReservationId),
+                ("@tenant_id", request.TenantId),
+                ("@dataset_id", request.DatasetId),
+                ("@object_id", request.ObjectId),
+                ("@version_id", request.VersionId)).ConfigureAwait(false);
+
+            if (rows != 1)
+            {
+                throw new InvalidOperationException("Reservation was not found in a cleanup-convertible state.");
+            }
+
+            await ExecuteAsync(
+                db,
+                transaction,
+                """
+                UPDATE replicas
+                SET state = @state,
+                    updated_at_ms = @converted_at_ms
+                WHERE replica_id = @replica_id
+                  AND version_id = @version_id
+                  AND state IN ('planned', 'streaming', 'verifying', 'stale', 'delete_pending');
+                """,
+                cancellationToken,
+                ("@state", nextReplicaState),
+                ("@converted_at_ms", ToUnixMs(request.ConvertedAt)),
+                ("@replica_id", request.ReplicaId),
+                ("@version_id", request.VersionId)).ConfigureAwait(false);
+
+            await AppendAuditAsync(
+                db,
+                transaction,
+                MetadataWorkflowNames.CleanupConversion,
+                "allowed",
+                actorId: null,
+                request.ObjectId,
+                request.VersionId,
+                request.IdempotencyKey,
+                request.ConvertedAt,
+                cancellationToken).ConfigureAwait(false);
+
+            await CompleteIdempotencyAsync(db, transaction, request.IdempotencyKey, request.ConvertedAt, cancellationToken)
+                .ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return new SqliteWorkflowResult(MetadataWorkflowNames.CleanupConversion, nextReservationState, Replayed: false, ["reservation.cleanup_converted"]);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    public async Task<SqliteWorkflowResult> RecordCapacityReportAsync(
+        IDbConnection connection,
+        SqliteCapacityReportRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateCapacityReport(request);
+        var db = RequireDbConnection(connection);
+        await EnsureOpenAsync(db, cancellationToken).ConfigureAwait(false);
+        await using var transaction = await db.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            var replay = await TryBeginIdempotencyAsync(
+                db,
+                transaction,
+                request.IdempotencyKey,
+                tenantId: null,
+                datasetId: null,
+                MetadataWorkflowNames.CapacityReport,
+                actorId: null,
+                request,
+                request.ObservedAt,
+                cancellationToken).ConfigureAwait(false);
+
+            if (replay)
+            {
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                return new SqliteWorkflowResult(MetadataWorkflowNames.CapacityReport, "replayed", Replayed: true, []);
+            }
+
+            await ExecuteAsync(
+                db,
+                transaction,
+                """
+                INSERT INTO capacity_reports (
+                    node_id,
+                    capacity_pressure,
+                    capacity_bytes,
+                    used_bytes,
+                    reserved_bytes,
+                    free_bytes,
+                    observed_at_ms,
+                    raw_report
+                )
+                VALUES (
+                    @node_id,
+                    @capacity_pressure,
+                    @capacity_bytes,
+                    @used_bytes,
+                    @reserved_bytes,
+                    @free_bytes,
+                    @observed_at_ms,
+                    @raw_report
+                );
+                """,
+                cancellationToken,
+                ("@node_id", request.NodeId),
+                ("@capacity_pressure", request.CapacityPressure),
+                ("@capacity_bytes", request.CapacityBytes),
+                ("@used_bytes", request.UsedBytes),
+                ("@reserved_bytes", request.ReservedBytes),
+                ("@free_bytes", request.FreeBytes),
+                ("@observed_at_ms", ToUnixMs(request.ObservedAt)),
+                ("@raw_report", request.RawReport)).ConfigureAwait(false);
+
+            await ExecuteAsync(
+                db,
+                transaction,
+                """
+                UPDATE nodes
+                SET capacity_pressure = @capacity_pressure,
+                    capacity_bytes = @capacity_bytes,
+                    used_bytes = @used_bytes,
+                    reserved_bytes = @reserved_bytes,
+                    free_bytes = @free_bytes,
+                    last_seen_at_ms = @observed_at_ms
+                WHERE node_id = @node_id;
+                """,
+                cancellationToken,
+                ("@node_id", request.NodeId),
+                ("@capacity_pressure", request.CapacityPressure),
+                ("@capacity_bytes", request.CapacityBytes),
+                ("@used_bytes", request.UsedBytes),
+                ("@reserved_bytes", request.ReservedBytes),
+                ("@free_bytes", request.FreeBytes),
+                ("@observed_at_ms", ToUnixMs(request.ObservedAt))).ConfigureAwait(false);
+
+            await AppendNodeAuditAsync(
+                db,
+                transaction,
+                MetadataWorkflowNames.CapacityReport,
+                "allowed",
+                request.NodeId,
+                request.IdempotencyKey,
+                request.ObservedAt,
+                cancellationToken).ConfigureAwait(false);
+
+            await CompleteIdempotencyAsync(db, transaction, request.IdempotencyKey, request.ObservedAt, cancellationToken)
+                .ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return new SqliteWorkflowResult(MetadataWorkflowNames.CapacityReport, request.CapacityPressure, Replayed: false, ["capacity.reported"]);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
+    }
+
     private static async Task<bool> TryBeginIdempotencyAsync(
         DbConnection connection,
         DbTransaction transaction,
@@ -801,6 +1260,41 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
             ("@actor_id", actorId),
             ("@object_id", objectId),
             ("@version_id", versionId),
+            ("@idempotency_key", idempotencyKey),
+            ("@occurred_at_ms", ToUnixMs(occurredAt)));
+
+    private static Task AppendNodeAuditAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        string workflow,
+        string decision,
+        string nodeId,
+        string idempotencyKey,
+        DateTimeOffset occurredAt,
+        CancellationToken cancellationToken) =>
+        ExecuteAsync(
+            connection,
+            transaction,
+            """
+            INSERT INTO audit_events (
+                workflow,
+                decision,
+                node_id,
+                idempotency_key,
+                occurred_at_ms
+            )
+            VALUES (
+                @workflow,
+                @decision,
+                @node_id,
+                @idempotency_key,
+                @occurred_at_ms
+            );
+            """,
+            cancellationToken,
+            ("@workflow", workflow),
+            ("@decision", decision),
+            ("@node_id", nodeId),
             ("@idempotency_key", idempotencyKey),
             ("@occurred_at_ms", ToUnixMs(occurredAt)));
 
@@ -943,6 +1437,53 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
         RequireText(request.ActorId, nameof(request.ActorId));
         RequirePositive(request.PlacementEpoch, nameof(request.PlacementEpoch));
         RequireNonNegative(request.DeleteEpoch, nameof(request.DeleteEpoch));
+        RequireText(request.IdempotencyKey, nameof(request.IdempotencyKey));
+    }
+
+    private static void ValidateLeaseRepair(SqliteLeaseRepairRequest request)
+    {
+        RequireText(request.TenantId, nameof(request.TenantId));
+        RequireText(request.DatasetId, nameof(request.DatasetId));
+        RequireText(request.ObjectId, nameof(request.ObjectId));
+        RequireText(request.VersionId, nameof(request.VersionId));
+        RequireText(request.JobId, nameof(request.JobId));
+        RequireText(request.LeaseId, nameof(request.LeaseId));
+        RequireText(request.HolderNodeId, nameof(request.HolderNodeId));
+        RequireText(request.Kind, nameof(request.Kind));
+        RequireText(request.Reason, nameof(request.Reason));
+        RequirePositive(request.LeaseDuration, nameof(request.LeaseDuration));
+        RequireText(request.IdempotencyKey, nameof(request.IdempotencyKey));
+    }
+
+    private static void ValidateExpireReservation(SqliteExpireReservationRequest request)
+    {
+        RequireText(request.TenantId, nameof(request.TenantId));
+        RequireText(request.DatasetId, nameof(request.DatasetId));
+        RequireText(request.ObjectId, nameof(request.ObjectId));
+        RequireText(request.VersionId, nameof(request.VersionId));
+        RequireText(request.ReservationId, nameof(request.ReservationId));
+        RequireText(request.IdempotencyKey, nameof(request.IdempotencyKey));
+    }
+
+    private static void ValidateCleanupConversion(SqliteCleanupConversionRequest request)
+    {
+        RequireText(request.TenantId, nameof(request.TenantId));
+        RequireText(request.DatasetId, nameof(request.DatasetId));
+        RequireText(request.ObjectId, nameof(request.ObjectId));
+        RequireText(request.VersionId, nameof(request.VersionId));
+        RequireText(request.ReservationId, nameof(request.ReservationId));
+        RequireText(request.ReplicaId, nameof(request.ReplicaId));
+        RequireText(request.IdempotencyKey, nameof(request.IdempotencyKey));
+    }
+
+    private static void ValidateCapacityReport(SqliteCapacityReportRequest request)
+    {
+        RequireText(request.NodeId, nameof(request.NodeId));
+        RequireText(request.CapacityPressure, nameof(request.CapacityPressure));
+        RequireNonNegative(request.CapacityBytes, nameof(request.CapacityBytes));
+        RequireNonNegative(request.UsedBytes, nameof(request.UsedBytes));
+        RequireNonNegative(request.ReservedBytes, nameof(request.ReservedBytes));
+        RequireNonNegative(request.FreeBytes, nameof(request.FreeBytes));
         RequireText(request.IdempotencyKey, nameof(request.IdempotencyKey));
     }
 

@@ -52,7 +52,7 @@ Admin is not a later dashboard. For v1, admin status, repair visibility, audit r
   - [x] complete replica
   - [x] commit version
   - [x] delete marker
-  - [ ] lease repair
+  - [x] lease repair
   - [ ] expire reservation
   - [ ] cleanup conversion
   - [ ] capacity report
@@ -74,10 +74,10 @@ Admin is not a later dashboard. For v1, admin status, repair visibility, audit r
   - [x] complete replica
   - [x] commit version
   - [x] delete marker
-  - [ ] lease repair
-  - [ ] expire reservation
-  - [ ] cleanup conversion
-  - [ ] capacity report
+  - [x] lease repair
+  - [x] expire reservation
+  - [x] cleanup conversion
+  - [x] capacity report
   - [ ] accept invite
   - [ ] revoke actor or node
   - [ ] claim outbox
@@ -131,7 +131,7 @@ Admin is not a later dashboard. For v1, admin status, repair visibility, audit r
 
 - [ ] Add unit tests for labels, transitions, and envelope vectors.
 - [x] Add SQLite migration integration tests.
-- [x] Add SQLite integration tests for create write intent, complete replica, commit version, and delete marker.
+- [x] Add SQLite integration tests for create write intent, complete replica, commit version, delete marker, lease repair, expire reservation, cleanup conversion, and capacity report.
 - [ ] Add SQLite integration tests for remaining workflows.
 - [ ] Add storage-agent crash tests.
 - [x] Add admin repository contract tests.

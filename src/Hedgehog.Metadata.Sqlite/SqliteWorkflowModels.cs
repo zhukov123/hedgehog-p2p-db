@@ -68,6 +68,53 @@ public sealed record SqliteCreateDeleteMarkerRequest(
     DateTimeOffset CreatedAt,
     string IdempotencyKey);
 
+public sealed record SqliteLeaseRepairRequest(
+    string TenantId,
+    string DatasetId,
+    string ObjectId,
+    string VersionId,
+    string JobId,
+    string? ReplicaId,
+    string LeaseId,
+    string HolderNodeId,
+    string Kind,
+    int Priority,
+    string Reason,
+    DateTimeOffset LeasedAt,
+    TimeSpan LeaseDuration,
+    string IdempotencyKey);
+
+public sealed record SqliteExpireReservationRequest(
+    string TenantId,
+    string DatasetId,
+    string ObjectId,
+    string VersionId,
+    string ReservationId,
+    DateTimeOffset ExpiredAt,
+    string IdempotencyKey);
+
+public sealed record SqliteCleanupConversionRequest(
+    string TenantId,
+    string DatasetId,
+    string ObjectId,
+    string VersionId,
+    string ReservationId,
+    string ReplicaId,
+    DateTimeOffset ConvertedAt,
+    bool RequiresCleanup,
+    string IdempotencyKey);
+
+public sealed record SqliteCapacityReportRequest(
+    string NodeId,
+    string CapacityPressure,
+    long CapacityBytes,
+    long UsedBytes,
+    long ReservedBytes,
+    long FreeBytes,
+    DateTimeOffset ObservedAt,
+    string IdempotencyKey,
+    byte[]? RawReport = null);
+
 public sealed record SqliteWorkflowResult(
     string Workflow,
     string State,
@@ -94,5 +141,25 @@ public interface ISqliteMetadataWorkflowStore
     Task<SqliteWorkflowResult> CreateDeleteMarkerAsync(
         IDbConnection connection,
         SqliteCreateDeleteMarkerRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<SqliteWorkflowResult> LeaseRepairAsync(
+        IDbConnection connection,
+        SqliteLeaseRepairRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<SqliteWorkflowResult> ExpireReservationAsync(
+        IDbConnection connection,
+        SqliteExpireReservationRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<SqliteWorkflowResult> CleanupConversionAsync(
+        IDbConnection connection,
+        SqliteCleanupConversionRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<SqliteWorkflowResult> RecordCapacityReportAsync(
+        IDbConnection connection,
+        SqliteCapacityReportRequest request,
         CancellationToken cancellationToken = default);
 }
