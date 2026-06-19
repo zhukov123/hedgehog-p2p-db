@@ -1,11 +1,12 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Hedgehog.LocalRuntime;
 using Hedgehog.Types;
 
 var parsedCommand = CommandLine.Parse(args);
 if (parsedCommand is null)
 {
-    Console.Error.WriteLine("usage: dotnet run --project tools/Hedgehog.Xtask -- validate-scaffold-contract [--json] [--allow-missing-scaffold]");
+    Console.Error.WriteLine("usage: dotnet run --project tools/Hedgehog.Xtask -- <validate-scaffold-contract|run-local-runtime-smoke> [--json] [--allow-missing-scaffold] [--runtime-root <path>]");
     return 2;
 }
 
@@ -13,6 +14,45 @@ var jsonOptions = new JsonSerializerOptions
 {
     WriteIndented = true,
 };
+
+if (parsedCommand.Command == "run-local-runtime-smoke")
+{
+    var useDefaultRuntimeRoot = parsedCommand.RuntimeRoot is null;
+    var runtimeRoot = parsedCommand.RuntimeRoot
+        ?? Path.Combine(Directory.GetCurrentDirectory(), ".hedgehog", "local-runtime-smoke");
+    if (Directory.Exists(runtimeRoot))
+    {
+        if (!useDefaultRuntimeRoot)
+        {
+            Console.Error.WriteLine($"custom runtime root already exists and will not be deleted automatically: {runtimeRoot}");
+            return 1;
+        }
+
+        Directory.Delete(runtimeRoot, recursive: true);
+    }
+
+    var result = await LocalRuntimeSmoke.RunAsync(LocalClusterOptions.CreateDefault(runtimeRoot));
+
+    if (parsedCommand.Json)
+    {
+        Console.WriteLine(JsonSerializer.Serialize(result, jsonOptions));
+    }
+    else
+    {
+        Console.WriteLine("local runtime smoke passed");
+        Console.WriteLine($"runtime_root={result.RuntimeRoot}");
+        Console.WriteLine($"heads={result.HeadCount}");
+        Console.WriteLine($"storage_nodes={result.StorageNodeCount}");
+        Console.WriteLine($"published_objects={result.PublishedObjects}");
+        Console.WriteLine($"verified_retrievals={result.VerifiedRetrievals}");
+        Console.WriteLine($"delete_verified={result.DeleteVerified}");
+        Console.WriteLine($"metadata_object_rows={result.MetadataObjectRows}");
+        Console.WriteLine($"healthy_replica_rows={result.HealthyReplicaRows}");
+    }
+
+    return 0;
+}
+
 var validator = new ScaffoldContractValidator(Directory.GetCurrentDirectory(), parsedCommand.AllowMissingScaffold);
 var failures = validator.Validate();
 
@@ -45,21 +85,23 @@ else
 
 return failures.Count == 0 ? 0 : 1;
 
-internal sealed record CommandLine(bool Json, bool AllowMissingScaffold)
+internal sealed record CommandLine(string Command, bool Json, bool AllowMissingScaffold, string? RuntimeRoot)
 {
     public static CommandLine? Parse(string[] args)
     {
-        if (args.Length == 0 || args[0] != "validate-scaffold-contract")
+        if (args.Length == 0 || args[0] is not ("validate-scaffold-contract" or "run-local-runtime-smoke"))
         {
             return null;
         }
 
+        var command = args[0];
         var json = false;
         var allowMissingScaffold = false;
+        string? runtimeRoot = null;
 
-        foreach (var arg in args.Skip(1))
+        for (var i = 1; i < args.Length; i++)
         {
-            switch (arg)
+            switch (args[i])
             {
                 case "--json":
                     json = true;
@@ -67,12 +109,20 @@ internal sealed record CommandLine(bool Json, bool AllowMissingScaffold)
                 case "--allow-missing-scaffold":
                     allowMissingScaffold = true;
                     break;
+                case "--runtime-root":
+                    if (i + 1 >= args.Length)
+                    {
+                        return null;
+                    }
+
+                    runtimeRoot = args[++i];
+                    break;
                 default:
                     return null;
             }
         }
 
-        return new CommandLine(json, allowMissingScaffold);
+        return new CommandLine(command, json, allowMissingScaffold, runtimeRoot);
     }
 }
 
@@ -182,12 +232,13 @@ internal sealed class ScaffoldContractValidator(string root, bool allowMissingSc
         new("Hedgehog.Metadata.Sqlite", "src/Hedgehog.Metadata.Sqlite/Hedgehog.Metadata.Sqlite.csproj", true),
         new("Hedgehog.Admin.Api", "src/Hedgehog.Admin.Api/Hedgehog.Admin.Api.csproj", true),
         new("Hedgehog.Admin.Ui", "src/Hedgehog.Admin.Ui/Hedgehog.Admin.Ui.csproj", true),
-        new("Hedgehog.Head", "src/Hedgehog.Head/Hedgehog.Head.csproj", false),
-        new("Hedgehog.Agent.Core", "src/Hedgehog.Agent.Core/Hedgehog.Agent.Core.csproj", false),
-        new("Hedgehog.Agent.Store", "src/Hedgehog.Agent.Store/Hedgehog.Agent.Store.csproj", false),
-        new("Hedgehog.StorageAgent", "src/Hedgehog.StorageAgent/Hedgehog.StorageAgent.csproj", false),
+        new("Hedgehog.Head", "src/Hedgehog.Head/Hedgehog.Head.csproj", true),
+        new("Hedgehog.Agent.Core", "src/Hedgehog.Agent.Core/Hedgehog.Agent.Core.csproj", true),
+        new("Hedgehog.Agent.Store", "src/Hedgehog.Agent.Store/Hedgehog.Agent.Store.csproj", true),
+        new("Hedgehog.StorageAgent", "src/Hedgehog.StorageAgent/Hedgehog.StorageAgent.csproj", true),
         new("Hedgehog.Repair", "src/Hedgehog.Repair/Hedgehog.Repair.csproj", false),
-        new("Hedgehog.Client", "src/Hedgehog.Client/Hedgehog.Client.csproj", false),
+        new("Hedgehog.Client", "src/Hedgehog.Client/Hedgehog.Client.csproj", true),
+        new("Hedgehog.LocalRuntime", "src/Hedgehog.LocalRuntime/Hedgehog.LocalRuntime.csproj", true),
         new("Hedgehog.Metadata.Core.Tests", "tests/Hedgehog.Metadata.Core.Tests/Hedgehog.Metadata.Core.Tests.csproj", true),
         new("Hedgehog.Metadata.Sqlite.Tests", "tests/Hedgehog.Metadata.Sqlite.Tests/Hedgehog.Metadata.Sqlite.Tests.csproj", true),
         new("Hedgehog.Admin.Api.Tests", "tests/Hedgehog.Admin.Api.Tests/Hedgehog.Admin.Api.Tests.csproj", true),
@@ -195,7 +246,7 @@ internal sealed class ScaffoldContractValidator(string root, bool allowMissingSc
         new("Hedgehog.StorageAgent.Tests", "tests/Hedgehog.StorageAgent.Tests/Hedgehog.StorageAgent.Tests.csproj", false),
         new("Hedgehog.Repair.Tests", "tests/Hedgehog.Repair.Tests/Hedgehog.Repair.Tests.csproj", false),
         new("Hedgehog.Client.Tests", "tests/Hedgehog.Client.Tests/Hedgehog.Client.Tests.csproj", false),
-        new("Hedgehog.LocalRuntime.Tests", "tests/Hedgehog.LocalRuntime.Tests/Hedgehog.LocalRuntime.Tests.csproj", false),
+        new("Hedgehog.LocalRuntime.Tests", "tests/Hedgehog.LocalRuntime.Tests/Hedgehog.LocalRuntime.Tests.csproj", true),
         new("Hedgehog.Xtask", "tools/Hedgehog.Xtask/Hedgehog.Xtask.csproj", true),
     ];
 

@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../Hedgehog.Crypto/Hedgehog.Crypto.csproj" />
+    <ProjectReference Include="../Hedgehog.Head/Hedgehog.Head.csproj" />
+  </ItemGroup>
+</Project>

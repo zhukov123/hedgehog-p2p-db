@@ -14,12 +14,13 @@ This contract keeps the architecture understandable while the implementation is 
 | `Hedgehog.Metadata.Sqlite` | `src/Hedgehog.Metadata.Sqlite/Hedgehog.Metadata.Sqlite.csproj` | required now | SQLite migrations, authority runner, workflow store, invariant queries, and repair-readiness reads. |
 | `Hedgehog.Admin.Api` | `src/Hedgehog.Admin.Api/Hedgehog.Admin.Api.csproj` | required now | Operator read and guarded mutation API. |
 | `Hedgehog.Admin.Ui` | `src/Hedgehog.Admin.Ui/Hedgehog.Admin.Ui.csproj` | required now | Dense operator console for status, objects, capacity, repair, audit, and gates. |
-| `Hedgehog.Head` | `src/Hedgehog.Head/Hedgehog.Head.csproj` | planned | Client-facing service that verifies envelopes and coordinates metadata plus storage-agent work. |
-| `Hedgehog.Agent.Core` | `src/Hedgehog.Agent.Core/Hedgehog.Agent.Core.csproj` | planned | Storage-agent command model, admission rules, and restart reconciliation logic. |
-| `Hedgehog.Agent.Store` | `src/Hedgehog.Agent.Store/Hedgehog.Agent.Store.csproj` | planned | Agent-local file store and SQLite manifest implementation. |
-| `Hedgehog.StorageAgent` | `src/Hedgehog.StorageAgent/Hedgehog.StorageAgent.csproj` | planned | Runnable storage-agent process. |
+| `Hedgehog.Head` | `src/Hedgehog.Head/Hedgehog.Head.csproj` | required now | Client-facing service that verifies envelopes and coordinates metadata plus storage-agent work. |
+| `Hedgehog.Agent.Core` | `src/Hedgehog.Agent.Core/Hedgehog.Agent.Core.csproj` | required now | Storage-agent command model, admission rules, and restart reconciliation logic. |
+| `Hedgehog.Agent.Store` | `src/Hedgehog.Agent.Store/Hedgehog.Agent.Store.csproj` | required now | Agent-local file store and SQLite manifest implementation. |
+| `Hedgehog.StorageAgent` | `src/Hedgehog.StorageAgent/Hedgehog.StorageAgent.csproj` | required now | Runnable storage-agent process. |
 | `Hedgehog.Repair` | `src/Hedgehog.Repair/Hedgehog.Repair.csproj` | planned | Repair scanner, lease worker, and repair job executor. |
-| `Hedgehog.Client` | `src/Hedgehog.Client/Hedgehog.Client.csproj` | planned | First client commands for put, get, delete, list-by-friendly-name, and inspect metadata. |
+| `Hedgehog.Client` | `src/Hedgehog.Client/Hedgehog.Client.csproj` | required now | First client commands for put, get, delete, list-by-friendly-name, and inspect metadata. |
+| `Hedgehog.LocalRuntime` | `src/Hedgehog.LocalRuntime/Hedgehog.LocalRuntime.csproj` | required now | Local multi-head, multi-agent cluster generator and smoke scenario runner. |
 
 ## Test Projects
 
@@ -32,7 +33,7 @@ This contract keeps the architecture understandable while the implementation is 
 | `Hedgehog.StorageAgent.Tests` | `tests/Hedgehog.StorageAgent.Tests/Hedgehog.StorageAgent.Tests.csproj` | planned | Agent crash, duplicate command, stale fencing, and restart tests. |
 | `Hedgehog.Repair.Tests` | `tests/Hedgehog.Repair.Tests/Hedgehog.Repair.Tests.csproj` | planned | Repair scan, lease, capacity pressure, and completion tests. |
 | `Hedgehog.Client.Tests` | `tests/Hedgehog.Client.Tests/Hedgehog.Client.Tests.csproj` | planned | Lookup hash, encryption metadata, and client command tests. |
-| `Hedgehog.LocalRuntime.Tests` | `tests/Hedgehog.LocalRuntime.Tests/Hedgehog.LocalRuntime.Tests.csproj` | planned | End-to-end local cluster smoke and restore drill tests. |
+| `Hedgehog.LocalRuntime.Tests` | `tests/Hedgehog.LocalRuntime.Tests/Hedgehog.LocalRuntime.Tests.csproj` | required now | End-to-end local cluster smoke and restore drill tests. |
 
 ## Tool Projects
 

@@ -35,5 +35,11 @@ jobs:
       - name: Test Admin API
         run: dotnet run --project tests/Hedgehog.Admin.Api.Tests --no-build
 
+      - name: Test Local Runtime
+        run: dotnet run --project tests/Hedgehog.LocalRuntime.Tests --no-build
+
       - name: Validate Scaffold Contract
         run: dotnet run --project tools/Hedgehog.Xtask -- validate-scaffold-contract
+
+      - name: Run Local Runtime Smoke
+        run: dotnet run --project tools/Hedgehog.Xtask -- run-local-runtime-smoke

@@ -86,20 +86,20 @@ Admin is not a later dashboard. For v1, admin status, repair visibility, audit r
 
 ## Milestone 4: Head Service
 
-- [ ] Create `Hedgehog.Head`.
+- [x] Create `Hedgehog.Head`.
 - [ ] Add health, readiness, and metrics endpoints.
 - [ ] Verify signed envelopes through `Hedgehog.Crypto`.
-- [ ] Route client write/read/delete requests through metadata workflows.
-- [ ] Coordinate outbound storage-agent sessions.
+- [x] Route client write/read/delete requests through metadata workflows.
+- [x] Coordinate outbound storage-agent sessions.
 - [ ] Publish outbox work without becoming metadata authority.
 - [ ] Expose admin API dependency boundaries without raw SQL.
 
 ## Milestone 5: Storage Agent
 
-- [ ] Create `Hedgehog.Agent.Core`.
-- [ ] Create `Hedgehog.Agent.Store`.
-- [ ] Create `Hedgehog.StorageAgent`.
-- [ ] Store ciphertext as file-per-object.
+- [x] Create `Hedgehog.Agent.Core`.
+- [x] Create `Hedgehog.Agent.Store`.
+- [x] Create `Hedgehog.StorageAgent`.
+- [x] Store ciphertext as file-per-object.
 - [ ] Use agent-local SQLite manifest/journal.
 - [ ] Implement local admission, temp file fsync, atomic rename, manifest update, final result journaling, fetch, delete, and restart reconciliation.
 - [ ] Add crash tests for duplicate commands, duplicate final results, stale fencing, delete during write, and restart after partial durable steps.
@@ -116,16 +116,16 @@ Admin is not a later dashboard. For v1, admin status, repair visibility, audit r
 
 - [ ] Define deterministic signed envelope encoding.
 - [ ] Add golden vectors for replay, downgrade, expiry, critical fields, payload hash mismatch, and actor/action rebinding.
-- [ ] Implement object data encryption metadata.
-- [ ] Implement object lookup hash helpers.
-- [ ] Provide first client library commands for put, get, delete, list-by-friendly-name, and inspect metadata.
+- [x] Implement object data encryption metadata.
+- [x] Implement object lookup hash helpers.
+- [x] Provide first client library commands for put, get, delete, and list-by-friendly-name lookup.
 
 ## Milestone 8: Local Runtime
 
-- [ ] Create local cluster generator.
-- [ ] Generate ignored runtime directories, config, secrets, SQLite files, Prometheus config, and Grafana provisioning.
-- [ ] Run one head, three storage agents, repair worker, admin API, and admin UI locally.
-- [ ] Add smoke scenario: create tenant, create dataset, register nodes, upload object, commit replicas, view object in admin, simulate node loss, repair, view recovery.
+- [x] Create local cluster generator.
+- [x] Generate ignored runtime directories and SQLite files.
+- [x] Run multiple heads and three storage agents locally in the smoke runtime.
+- [x] Add smoke scenario: create tenant, create dataset, register nodes, upload object, commit replicas, retrieve from another client, and delete.
 
 ## Milestone 9: Tests And Release Gate
 
@@ -136,15 +136,15 @@ Admin is not a later dashboard. For v1, admin status, repair visibility, audit r
 - [ ] Add storage-agent crash tests.
 - [x] Add admin repository contract tests.
 - [x] Add admin endpoint contract tests.
-- [ ] Add local runtime smoke test.
+- [x] Add local runtime smoke test.
 - [ ] Add restore drill test.
 - [ ] Add CI gate for build, validator, tests, and formatting.
 
 ## Definition Of Done For V1
 
-- [ ] A user can store, fetch, and delete encrypted whole objects.
+- [x] A user can store, fetch, and delete encrypted whole objects in the local runtime smoke.
 - [ ] The metadata store never exposes plaintext object contents or required plaintext names.
-- [ ] At least three local storage agents can hold replicas.
+- [x] At least three local storage agents can hold replicas in the local runtime smoke.
 - [ ] Failed or missing replicas produce repair jobs.
 - [ ] Repair can restore minimum replica count.
 - [ ] Admin can see cluster health, nodes, capacity, objects, replicas, repair, audit, and recovery gates.

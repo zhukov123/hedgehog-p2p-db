@@ -32,11 +32,37 @@ The repository now includes the first .NET solution scaffold:
 - `Hedgehog.Crypto`
 - `Hedgehog.Metadata.Core`
 - `Hedgehog.Metadata.Sqlite`
+- `Hedgehog.Agent.Core`
+- `Hedgehog.Agent.Store`
+- `Hedgehog.StorageAgent`
+- `Hedgehog.Head`
+- `Hedgehog.Client`
+- `Hedgehog.LocalRuntime`
 - `Hedgehog.Xtask`
 
 Expected validation commands once the .NET SDK is installed:
 
 ```text
-dotnet build
+dotnet build Hedgehog.sln
 dotnet run --project tools/Hedgehog.Xtask -- validate-scaffold-contract
+```
+
+## Local Runtime Smoke
+
+The first local runtime proof starts two in-process head nodes, three file-backed storage agents, and two clients. The clients publish encrypted whole objects through different heads, retrieve each other's data, and verify a delete marker prevents later retrieval.
+
+```text
+dotnet run --project tools/Hedgehog.Xtask -- run-local-runtime-smoke
+```
+
+Expected shape:
+
+```text
+local runtime smoke passed
+heads=2
+storage_nodes=3
+published_objects=2
+verified_retrievals=2
+delete_verified=True
+healthy_replica_rows=6
 ```

@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Hedgehog.Agent.Core/Hedgehog.Agent.Core.csproj" />
+    <ProjectReference Include="../Hedgehog.Metadata.Sqlite/Hedgehog.Metadata.Sqlite.csproj" />
+  </ItemGroup>
+</Project>
