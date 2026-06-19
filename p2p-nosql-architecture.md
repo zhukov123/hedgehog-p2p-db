@@ -148,6 +148,8 @@ object_lookup_hash = HMAC-SHA256(dataset_lookup_secret, normalized_object_name)
 
 The dataset lookup secret is available only to authorized clients. The metadata store can use `object_lookup_hash` for deterministic lookup, but cannot cheaply guess names such as `photo.jpg`, `taxes.pdf`, or `resume.docx` without the secret.
 
+The full v1-alpha key model is defined in [p2p-object-store-key-model.md](p2p-object-store-key-model.md).
+
 Application-level JSON documents, CRDT fields, secondary indexes, and query views are deferred until the object-store foundation is correct.
 
 ### 6. Write Path

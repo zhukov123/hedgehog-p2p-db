@@ -14,7 +14,7 @@ Use it as the source of truth for crate ownership, dependency direction, state l
 
 1. `p2p-nosql-scaffold-contract.md`
 2. `p2p-nosql-implementation-contract.md`
-3. `p2p-nosql-postgresql-schema-plan.md`
+3. `p2p-object-store-sqlite-schema-plan.md`
 4. `p2p-nosql-capacity-admission.md`
 5. `p2p-nosql-degraded-mode-cache-policy.md`
 6. `p2p-nosql-security-authority.md`

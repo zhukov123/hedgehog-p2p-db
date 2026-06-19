@@ -77,6 +77,8 @@ object_lookup_hash = HMAC-SHA256(dataset_lookup_secret, normalized_object_name)
 
 So if Alice looks up `family/photo.jpg`, her client computes the same lookup hash every time. The metadata store can find the object by hash, but does not store `family/photo.jpg` as plaintext.
 
+The lookup secret is scoped to a dataset. The full key model is defined in [p2p-object-store-key-model.md](p2p-object-store-key-model.md).
+
 ```mermaid
 flowchart TD
     Tenant --> Dataset

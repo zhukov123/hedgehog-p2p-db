@@ -323,7 +323,7 @@ The storage-agent protocol slice is captured in `p2p-nosql-storage-agent-protoco
 
 The replication and repair state-machine slice is captured in `p2p-nosql-replication-repair-state-machine.md`.
 
-The metadata store schema plan is captured in `p2p-nosql-postgresql-schema-plan.md`.
+The metadata store schema plan is captured in `p2p-object-store-sqlite-schema-plan.md`.
 
 The capacity admission and repair-reserve slice is captured in `p2p-nosql-capacity-admission.md`.
 

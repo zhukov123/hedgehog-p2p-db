@@ -1,0 +1,15 @@
+[workspace]
+members = [
+    "crates/hedgehog-types",
+    "crates/hedgehog-crypto",
+    "crates/hedgehog-metadata-core",
+    "crates/hedgehog-metadata-sql",
+    "xtask",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/vishwakapoor/hedgehog-p2p-db"
+

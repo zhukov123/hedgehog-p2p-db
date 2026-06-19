@@ -12,7 +12,7 @@ Accepted findings:
 - Backup readiness must include WAL archiving, PITR to a named timestamp, weekly restore drills during beta, failover drills, outbox replay tests, and invariant checks after restore.
 
 Risk register changes:
-- Added `p2p-nosql-postgresql-schema-plan.md` as the concrete schema bridge from architecture to implementation.
+- Added `p2p-object-store-sqlite-schema-plan.md` as the concrete schema bridge from architecture to implementation.
 - Raised migration, restore, outbox replay, and stale fencing after failover as beta-blocking risks.
 - Moved the next design decision to exact capacity admission and repair-reserve formulas.
 

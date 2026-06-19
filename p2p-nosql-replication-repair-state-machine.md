@@ -246,7 +246,7 @@ Accepted findings:
 
 ## Next Unresolved Portion
 
-The metadata store schema and migration slice is captured in `p2p-nosql-postgresql-schema-plan.md`.
+The metadata store schema and migration slice is captured in `p2p-object-store-sqlite-schema-plan.md`.
 
 The capacity admission and repair-reserve slice is captured in `p2p-nosql-capacity-admission.md`.
 

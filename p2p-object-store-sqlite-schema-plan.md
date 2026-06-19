@@ -10,6 +10,14 @@ Principles:
 - Storage agents never decide object liveness.
 - Triggers should be avoided for the main state machine; use explicit Rust transactions and tests.
 
+SQLite conventions:
+- IDs are stored as lowercase text UUIDs unless a later implementation chooses 16-byte BLOB IDs consistently.
+- Hashes, signatures, and encrypted blobs are stored as `blob`.
+- Timestamps are stored as integer Unix milliseconds.
+- Boolean values are stored as integer `0 | 1`.
+- JSON-like payloads are stored as canonical JSON text or deterministic CBOR blobs; signed or hashed data should prefer deterministic CBOR.
+- `PRAGMA foreign_keys = ON` is required for every connection.
+
 ## Tables
 
 ### `objects`
@@ -19,17 +27,18 @@ Purpose:
 - owns the current head pointer, placement epoch, and delete epoch
 
 Key columns:
-- `object_id uuid primary key`
-- `tenant_id uuid not null`
-- `dataset_id uuid not null`
-- `object_lookup_hash bytea not null`
+- `object_id text primary key`
+- `tenant_id text not null`
+- `dataset_id text not null`
+- `object_lookup_hash blob not null`
+- `lookup_key_id text not null`
 - `encrypted_name_metadata blob null`
-- `current_version_id uuid null`
+- `current_version_id text null`
 - `state text not null`: `active | delete_marker | deleted`
-- `placement_epoch bigint not null default 1`
-- `delete_epoch bigint not null default 0`
-- `created_at timestamptz not null`
-- `updated_at timestamptz not null`
+- `placement_epoch integer not null default 1`
+- `delete_epoch integer not null default 0`
+- `created_at_ms integer not null`
+- `updated_at_ms integer not null`
 
 Required indexes:
 - unique `(tenant_id, dataset_id, object_lookup_hash)`
@@ -42,21 +51,22 @@ Purpose:
 - deletes create delete-marker versions
 
 Key columns:
-- `version_id uuid primary key`
-- `object_id uuid not null references objects(object_id)`
-- `version_no bigint not null`
+- `version_id text primary key`
+- `object_id text not null references objects(object_id)`
+- `version_no integer not null`
 - `state text not null`: `writing | committed | under_replicated | quarantined | delete_marker | gc_eligible | garbage_collected`
-- `content_hash bytea null`
-- `size_bytes bigint null`
+- `content_hash blob null`
+- `size_bytes integer null`
 - `encryption_alg text not null`
-- `encryption_key_id text not null`
-- `metadata jsonb not null default '{}'`
-- `placement_epoch bigint not null`
-- `delete_epoch bigint not null default 0`
-- `required_replica_count int not null`
-- `committed_at timestamptz null`
-- `created_at timestamptz not null`
-- `updated_at timestamptz not null`
+- `data_key_id text not null`
+- `wrapped_object_data_key blob null`
+- `encryption_metadata blob null`
+- `placement_epoch integer not null`
+- `delete_epoch integer not null default 0`
+- `required_replica_count integer not null`
+- `committed_at_ms integer null`
+- `created_at_ms integer not null`
+- `updated_at_ms integer not null`
 
 Required indexes:
 - unique `(object_id, version_no)`
@@ -68,18 +78,18 @@ Purpose:
 - expected and observed replica lifecycle for a version on a node
 
 Key columns:
-- `replica_id uuid primary key`
-- `version_id uuid not null references object_versions(version_id)`
-- `node_id uuid not null`
+- `replica_id text primary key`
+- `version_id text not null references object_versions(version_id)`
+- `node_id text not null`
 - `state text not null`: `planned | streaming | verifying | healthy | suspect | corrupt | stale | delete_pending | deleted`
-- `placement_epoch bigint not null`
-- `delete_epoch bigint not null default 0`
-- `fencing_token bigint not null`
-- `byte_count bigint null`
-- `hash_confirmed boolean not null default false`
-- `last_verified_at timestamptz null`
-- `created_at timestamptz not null`
-- `updated_at timestamptz not null`
+- `placement_epoch integer not null`
+- `delete_epoch integer not null default 0`
+- `fencing_token integer not null`
+- `byte_count integer null`
+- `hash_confirmed integer not null default 0`
+- `last_verified_at_ms integer null`
+- `created_at_ms integer not null`
+- `updated_at_ms integer not null`
 
 Required indexes:
 - unique `(version_id, node_id)`
@@ -92,18 +102,18 @@ Purpose:
 - active ownership and fencing for storage-agent and repair work
 
 Key columns:
-- `lease_id uuid primary key`
+- `lease_id text primary key`
 - `resource_type text not null`
-- `resource_id uuid not null`
-- `holder_id uuid not null`
-- `fencing_token bigint not null`
-- `expires_at timestamptz not null`
-- `created_at timestamptz not null`
-- `renewed_at timestamptz null`
+- `resource_id text not null`
+- `holder_id text not null`
+- `fencing_token integer not null`
+- `expires_at_ms integer not null`
+- `created_at_ms integer not null`
+- `renewed_at_ms integer null`
 
 Required indexes:
 - unique `(resource_type, resource_id)`
-- index `(expires_at)`
+- index `(expires_at_ms)`
 
 ### `repair_jobs`
 
@@ -111,24 +121,24 @@ Purpose:
 - deduped and prioritized repair/delete/GC work
 
 Key columns:
-- `job_id uuid primary key`
-- `version_id uuid not null references object_versions(version_id)`
-- `replica_id uuid null references replicas(replica_id)`
+- `job_id text primary key`
+- `version_id text not null references object_versions(version_id)`
+- `replica_id text null references replicas(replica_id)`
 - `kind text not null`: `under_replicated | suspect_verify | missing_replace | delete_cleanup | gc`
 - `priority int not null`
 - `state text not null`: `pending | leased | running | verifying | completed | retry_wait | failed_final | canceled_superseded`
-- `attempt_count int not null default 0`
-- `lease_id uuid null references leases(lease_id)`
-- `not_before timestamptz not null default now()`
+- `attempt_count integer not null default 0`
+- `lease_id text null references leases(lease_id)`
+- `not_before_ms integer not null`
 - `last_error text null`
 - `idempotency_key text not null`
-- `created_at timestamptz not null`
-- `updated_at timestamptz not null`
+- `created_at_ms integer not null`
+- `updated_at_ms integer not null`
 
 Required indexes:
 - unique `(idempotency_key)`
 - partial unique `(version_id, kind) where state in ('pending', 'leased', 'running', 'verifying', 'retry_wait')`
-- index `(state, priority desc, not_before, created_at)`
+- index `(state, priority desc, not_before_ms, created_at_ms)`
 
 ### `tombstones`
 
@@ -136,18 +146,18 @@ Purpose:
 - correctness state for deletes, delayed completions, stale repair, and GC
 
 Key columns:
-- `tombstone_id uuid primary key`
-- `object_id uuid not null references objects(object_id)`
-- `version_id uuid null references object_versions(version_id)`
-- `delete_epoch bigint not null`
+- `tombstone_id text primary key`
+- `object_id text not null references objects(object_id)`
+- `version_id text null references object_versions(version_id)`
+- `delete_epoch integer not null`
 - `reason text not null`
-- `retain_until timestamptz not null`
-- `gc_completed_at timestamptz null`
-- `created_at timestamptz not null`
+- `retain_until_ms integer not null`
+- `gc_completed_at_ms integer null`
+- `created_at_ms integer not null`
 
 Required indexes:
 - unique `(object_id, delete_epoch)`
-- partial index `(retain_until) where gc_completed_at is null`
+- partial index `(retain_until_ms) where gc_completed_at_ms is null`
 
 ### `idempotency_records`
 
@@ -157,16 +167,16 @@ Purpose:
 Key columns:
 - `scope text not null`
 - `key text not null`
-- `request_hash bytea not null`
+- `request_hash blob not null`
 - `status text not null`: `started | succeeded | failed`
-- `response jsonb null`
-- `expires_at timestamptz not null`
-- `created_at timestamptz not null`
-- `updated_at timestamptz not null`
+- `response_json text null`
+- `expires_at_ms integer not null`
+- `created_at_ms integer not null`
+- `updated_at_ms integer not null`
 
 Required indexes:
 - primary key `(scope, key)`
-- index `(expires_at)`
+- index `(expires_at_ms)`
 
 ### `outbox_events`
 
@@ -174,18 +184,18 @@ Purpose:
 - durable bridge from metadata transactions to head workers, storage-agent commands, repair schedulers, audit sinks, and notifications
 
 Key columns:
-- `event_id uuid primary key`
+- `event_id text primary key`
 - `aggregate_type text not null`
-- `aggregate_id uuid not null`
+- `aggregate_id text not null`
 - `event_type text not null`
-- `payload jsonb not null`
+- `payload_json text not null`
 - `dedupe_key text not null`
-- `published_at timestamptz null`
-- `created_at timestamptz not null default now()`
+- `published_at_ms integer null`
+- `created_at_ms integer not null`
 
 Required indexes:
 - unique `(dedupe_key)`
-- partial index `(published_at, created_at) where published_at is null`
+- partial index `(published_at_ms, created_at_ms) where published_at_ms is null`
 
 ## Transaction Patterns
 
@@ -241,7 +251,7 @@ Steps:
 ### GC Eligibility
 
 Steps:
-1. Find tombstones with `retain_until < now()`.
+1. Find tombstones with `retain_until_ms < now_ms`.
 2. Confirm no live replicas for old versions except `deleted/corrupt`.
 3. Confirm no active repair jobs for affected versions.
 4. Confirm version is not `objects.current_version_id`.

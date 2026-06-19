@@ -183,7 +183,7 @@ Write migrations in this order:
 12. capacity reservation tables, if the reserve model cannot be fully derived from object/version/replica rows
 
 Early indexes and constraints:
-- unique `objects(tenant_id, dataset_id, object_lookup_hash)` where `object_lookup_hash` is not null
+- unique `objects(tenant_id, dataset_id, object_lookup_hash)`
 - unique `object_versions(object_id, version_seq)`
 - partial unique current/live version index
 - unique `replicas(version_id, node_id)`
