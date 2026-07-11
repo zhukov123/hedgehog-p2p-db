@@ -311,6 +311,7 @@ public sealed class LocalCluster : IAsyncDisposable
     {
         DataSource = MetadataPath,
         Cache = SqliteCacheMode.Shared,
+        Pooling = false,
     }.ToString();
 
     private async Task<SqliteConnection> OpenConnectionAsync(CancellationToken cancellationToken)

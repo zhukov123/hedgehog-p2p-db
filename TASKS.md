@@ -138,7 +138,7 @@ Admin is not a later dashboard. For v1, admin status, repair visibility, audit r
 - [x] Add admin repository contract tests.
 - [x] Add admin endpoint contract tests.
 - [x] Add local runtime smoke test.
-- [ ] Add restore drill test.
+- [x] Add restore drill test for implemented SQLite metadata, delete markers, storage manifests, and replica blobs.
 - [ ] Add CI gate for build, validator, tests, and formatting.
 
 ## Definition Of Done For V1
@@ -151,3 +151,5 @@ Admin is not a later dashboard. For v1, admin status, repair visibility, audit r
 - [ ] Admin can see cluster health, nodes, capacity, objects, replicas, repair, audit, and recovery gates.
 - [ ] Dangerous admin actions are signed, audited, and visible.
 - [ ] A local restore drill proves metadata, outbox, reservations, and repair state recover coherently.
+  - [x] Implemented-state restore drill covers SQLite metadata, committed versions, delete markers, storage manifests, and replica blobs.
+  - [ ] Extend restore drill to outbox, reservations, and repair state when those workflows are implemented.

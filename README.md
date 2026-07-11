@@ -91,6 +91,32 @@ healthy_replica_rows=108
 delete_marker_rows=9
 ```
 
+## Local Restore Drill
+
+The restore drill writes and fully replicates two encrypted objects, deletes one object, copies the SQLite metadata database and storage-agent replica directories through a backup directory, starts a fresh local cluster from the restored copy, and verifies the surviving object remains readable while the delete marker still blocks reads.
+
+```text
+dotnet run --project tools/Hedgehog.Xtask -- run-local-restore-drill
+```
+
+Expected shape:
+
+```text
+local restore drill passed
+heads=2
+storage_nodes=3
+objects_written=2
+reads_verified_after_restore=1
+delete_marker_verified_after_restore=True
+metadata_object_rows=2
+metadata_version_rows=3
+healthy_replica_rows=6
+delete_marker_rows=1
+restored_replica_files=6
+```
+
+This is the current local durability gate for implemented state: SQLite metadata, committed object versions, delete markers, file-backed storage manifests, and replica blobs. Outbox replay, repair jobs, and reservation recovery remain future restore coverage as those workflows are implemented.
+
 ## Curlable Local Runtime API
 
 Start a fresh local runtime API:
