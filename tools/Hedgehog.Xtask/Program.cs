@@ -381,4 +381,573 @@ internal sealed class ScaffoldContractValidator(string root, bool allowMissingSc
         new("Hedgehog.Metadata.Sqlite", "src/Hedgehog.Metadata.Sqlite/Hedgehog.Metadata.Sqlite.csproj", true),
         new("Hedgehog.Admin.Api", "src/Hedgehog.Admin.Api/Hedgehog.Admin.Api.csproj", true),
         new("Hedgehog.Admin.Ui", "src/Hedgehog.Admin.Ui/Hedgehog.Admin.Ui.csproj", true),
-        new("Hedgehog.Head", "src/Hedgehog.Head/Hedgehog.Head.csproj", tÛ^x¶‰Ëkºwµçh€€€€€€€€€€€¥˜€¡Í•Ñ¥½¸€ôô€‰™¥áÑÕÉ”ˆ¤(€€€€€€€€€€€ì(€€€€€€€€€€€€€€€I•ÅÕ¥É•MÑÉ¥¹œ¡Í•Ñ¥½¸°•¹ÑÉä°€‰Í•¹…É¥¼ˆ°™…¥±ÕÉ•Ì¤ì(€€€€€€€€€€€€€€€¥˜€¡•¹ÑÉä¹•Ñ	½½±•…¸ ‰‰•Ñ…}‰±½­•Èˆ¤€„ôÑÉÕ”¤(€€€€€€€€€€€€€€€ì(€€€€€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì¹‘¡¹•Ü ‰™¥áÑÕÉ•Ì¹µ…¹¥™•ÍĞˆ°€‰™¥áÑÕÉ”p‰íÍ±Õœ€üü€‰±¥¹”í•¹ÑÉä¹1¥¹•ô‰õpˆµÕÍĞÍ•Ğ‰•Ñ…}‰±½­•È€ôÑÉÕ”ˆ°5…¹¥™•ÍÑA…Ñ ¤¤ì(€€€€€€€€€€€€€€€ô(€€€€€€€€€€€ô(€€€€€€€€€€€•±Í”¥˜€¡Í•Ñ¥½¸€ôô€‰Ñ…Í¬ˆ¤(€€€€€€€€€€€ì(€€€€€€€€€€€€€€€I•ÅÕ¥É•MÑÉ¥¹œ¡Í•Ñ¥½¸°•¹ÑÉä°€‰ÍÑ…ÑÕÌˆ°™…¥±ÕÉ•Ì¤ì(€€€€€€€€€€€€€€€¥˜€¡•¹ÑÉä¹•Ñ	½½±•…¸ ‰ØÅ}É•ÅÕ¥É•ˆ¤€„ôÑÉÕ”¤(€€€€€€€€€€€€€€€ì(€€€€€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì¹‘¡¹•Ü ‰ÉÕ¹Ñ¥µ”¹Ñ…Í­Ìˆ°€‰Ñ…Í¬p‰íÍ±Õœ€üü€‰±¥¹”í•¹ÑÉä¹1¥¹•ô‰õpˆµÕÍĞÍ•ĞØÅ}É•ÅÕ¥É•€ôÑÉÕ”ˆ°5…¹¥™•ÍÑA…Ñ ¤¤ì(€€€€€€€€€€€€€€€ô(€€€€€€€€€€€ô(€€€€€€€ô(€€€ô((€€€ÁÉ¥Ù…Ñ”ÍÑ…Ñ¥ŒÙ½¥I•ÅÕ¥É•MÑÉ¥¹œ¡ÍÑÉ¥¹œÍ•Ñ¥½¸°5…¹¥™•ÍÑ¹ÑÉä•¹ÑÉä°ÍÑÉ¥¹œ­•ä°1¥ÍĞñY…±¥‘…Ñ¥½¹…¥±ÕÉ”ø™…¥±ÕÉ•Ì¤(€€€ì(€€€€€€€¥˜€¡ÍÑÉ¥¹œ¹%Í9Õ±±=É]¡¥Ñ•MÁ…”¡•¹ÑÉä¹•ÑMÑÉ¥¹œ¡­•ä¤¤¤(€€€€€€€ì(€€€€€€€€€€€™…¥±ÕÉ•Ì¹‘¡¹•Ü ‰™¥áÑÕÉ•Ì¹µ…¹¥™•ÍĞˆ°€‰íÍ•Ñ¥½¹ôp‰í•¹ÑÉä¹•ÑMÑÉ¥¹œ ‰Í±Õœˆ¤€üü€‰±¥¹”í•¹ÑÉä¹1¥¹•ô‰õpˆ¥Ìµ¥ÍÍ¥¹œí­•åôˆ°5…¹¥™•ÍÑA…Ñ ¤¤ì(€€€€€€€ô(€€€ô((€€€ÁÉ¥Ù…Ñ”ÍÑ…Ñ¥ŒÙ½¥Y…±¥‘…Ñ•I•ÅÕ¥É•‘Q…Í­Ì¡5…¹¥™•ÍÑ½Õµ•¹Ğµ…¹¥™•ÍĞ°1¥ÍĞñY…±¥‘…Ñ¥½¹…¥±ÕÉ”ø™…¥±ÕÉ•Ì¤(€€€ì(€€€€€€€Ù…È‰åM±Õœ€ô%¹‘•á¹ÑÉ¥•Í	åM±Õœ ‰Ñ…Í¬ˆ°µ…¹¥™•ÍĞ¹Q…Í­Ì°™…¥±ÕÉ•Ì¤ì((€€€€€€€™½É•… €¡Ù…ÈÑ…Í¬¥¸I•ÅÕ¥É•‘Q…Í­Ì¤(€€€€€€€ì(€€€€€€€€€€€¥˜€ …‰åM±Õœ¹QÉå•ÑY…±Õ”¡Ñ…Í¬¹M±Õœ°½ÕĞÙ…È•¹ÑÉä¤¤(€€€€€€€€€€€ì(€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì¹‘¡¹•Ü ‰ÉÕ¹Ñ¥µ”¹Ñ…Í­Ìˆ°€‰µ¥ÍÍ¥¹œ±½…°ÉÕ¹Ñ¥µ”Ñ…Í¬p‰íÑ…Í¬¹9…µ•õpˆ€¡Í±ÕœíÑ…Í¬¹M±Õô¤ˆ°5…¹¥™•ÍÑA…Ñ ¤¤ì(€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”ì(€€€€€€€€€€€ô((€€€€€€€€€€€¥˜€¡•¹ÑÉä¹•Ñ	½½±•…¸ ‰ØÅ}É•ÅÕ¥É•ˆ¤€„ôÑÉÕ”¤(€€€€€€€€€€€ì(€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì¹‘¡¹•Ü ‰ÉÕ¹Ñ¥µ”¹Ñ…Í­Ìˆ°€‰±½…°ÉÕ¹Ñ¥µ”Ñ…Í¬p‰íÑ…Í¬¹M±ÕõpˆµÕÍĞ‰”ØÅ}É•ÅÕ¥É•ˆ°5…¹¥™•ÍÑA…Ñ ¤¤ì(€€€€€€€€€€€ô(€€€€€€€ô(€€€ô((€€€ÁÉ¥Ù…Ñ”ÍÑ…Ñ¥ŒÙ½¥Y…±¥‘…Ñ•I•ÅÕ¥É•‘¥áÑÕÉ•Ì¡5…¹¥™•ÍÑ½Õµ•¹Ğµ…¹¥™•ÍĞ°1¥ÍĞñY…±¥‘…Ñ¥½¹…¥±ÕÉ”ø™…¥±ÕÉ•Ì¤(€€€ì(€€€€€€€Ù…È‰åM±Õœ€ô%¹‘•á¹ÑÉ¥•Í	åM±Õœ ‰™¥áÑÕÉ”ˆ°µ…¹¥™•ÍĞ¹¥áÑÕÉ•Ì°™…¥±ÕÉ•Ì¤ì((€€€€€€€™½É•… €¡Ù…È™¥áÑÕÉ”¥¸I•ÅÕ¥É•‘¥áÑÕÉ•Ì¤(€€€€€€€ì(€€€€€€€€€€€¥˜€ …‰åM±Õœ¹QÉå•ÑY…±Õ”¡™¥áÑÕÉ”¹M±Õœ°½ÕĞÙ…È•¹ÑÉä¤¤(€€€€€€€€€€€ì(€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì¹‘¡¹•Ü ‰™¥áÑÕÉ•Ì¹ÁÉ•Í•¹Ğˆ°€‰µ¥ÍÍ¥¹œ‰•Ñ„™¥áÑÕÉ”p‰í™¥áÑÕÉ”¹9…µ•õpˆ€¡Í±Õœí™¥áÑÕÉ”¹M±Õô¤ˆ°5…¹¥™•ÍÑA…Ñ ¤¤ì(€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”ì(€€€€€€€€€€€ô((€€€€€€€€€€€¥˜€ …ÍÑÉ¥¹œ¹ÅÕ…±Ì¡•¹ÑÉä¹•ÑMÑÉ¥¹œ ‰Í•¹…É¥¼ˆ¤°™¥áÑÕÉ”¹9…µ”°MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…°¤¤(€€€€€€€€€€€ì(€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì¹‘¡¹•Ü ‰™¥áÑÕÉ•Ì¹ÁÉ•Í•¹Ğˆ°€‰™¥áÑÕÉ”p‰í™¥áÑÕÉ”¹M±ÕõpˆµÕÍĞÕÍ”Í•¹…É¥¼p‰í™¥áÑÕÉ”¹9…µ•õpˆˆ°5…¹¥™•ÍÑA…Ñ ¤¤ì(€€€€€€€€€€€ô((€€€€€€€€€€€¥˜€¡•¹ÑÉä¹•Ñ	½½±•…¸ ‰‰•Ñ…}‰±½­•Èˆ¤€„ôÑÉÕ”¤(€€€€€€€€€€€ì(€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì¹‘¡¹•Ü ‰™¥áÑÕÉ•Ì¹ÁÉ•Í•¹Ğˆ°€‰™¥áÑÕÉ”p‰í™¥áÑÕÉ”¹M±ÕõpˆµÕÍĞ‰”µ…É­•‰•Ñ…}‰±½­•Èˆ°5…¹¥™•ÍÑA…Ñ ¤¤ì(€€€€€€€€€€€ô(€€€€€€€ô(€€€ô((€€€ÁÉ¥Ù…Ñ”ÍÑ…Ñ¥Œ¥Ñ¥½¹…ÉäñÍÑÉ¥¹œ°5…¹¥™•ÍÑ¹ÑÉäø%¹‘•á¹ÑÉ¥•Í	åM±Õœ (€€€€€€€ÍÑÉ¥¹œÍ•Ñ¥½¸°(€€€€€€€%I•…‘=¹±å1¥ÍĞñ5…¹¥™•ÍÑ¹ÑÉäø•¹ÑÉ¥•Ì°(€€€€€€€1¥ÍĞñY…±¥‘…Ñ¥½¹…¥±ÕÉ”ø™…¥±ÕÉ•Ì¤(€€€ì(€€€€€€€Ù…È‰åM±Õœ€ô¹•Ü¥Ñ¥½¹…ÉäñÍÑÉ¥¹œ°5…¹¥™•ÍÑ¹ÑÉäø¡MÑÉ¥¹½µÁ…É•È¹=É‘¥¹…°¤ì(€€€€€€€™½É•… €¡Ù…È•¹ÑÉä¥¸•¹ÑÉ¥•Ì¤(€€€€€€€ì(€€€€€€€€€€€Ù…ÈÍ±Õœ€ô•¹ÑÉä¹•ÑMÑÉ¥¹œ ‰Í±Õœˆ¤ì(€€€€€€€€€€€¥˜€¡ÍÑÉ¥¹œ¹%Í9Õ±±=É]¡¥Ñ•MÁ…”¡Í±Õœ¤¤(€€€€€€€€€€€ì(€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”ì(€€€€€€€€€€€ô((€€€€€€€€€€€¥˜€ …‰åM±Õœ¹QÉå‘¡Í±Õœ°•¹ÑÉä¤¤(€€€€€€€€€€€ì(€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì¹‘¡¹•Ü ‰™¥áÑÕÉ•Ì¹µ…¹¥™•ÍĞˆ°€‰‘ÕÁ±¥…Ñ”íÍ•Ñ¥½¹ôÍ±Õœp‰íÍ±Õõpˆˆ°5…¹¥™•ÍÑA…Ñ ¤¤ì(€€€€€€€€€€€ô(€€€€€€€ô((€€€€€€€É•ÑÕÉ¸‰åM±Õœì(€€€ô((€€€ÁÉ¥Ù…Ñ”ÍÑ…Ñ¥ŒÙ½¥Y…±¥‘…Ñ•5…¹¥™•ÍÑ1…‰•±Ì¡5…¹¥™•ÍÑ½Õµ•¹Ğµ…¹¥™•ÍĞ°1¥ÍĞñY…±¥‘…Ñ¥½¹…¥±ÕÉ”ø™…¥±ÕÉ•Ì¤(€€€ì(€€€€€€€Ù…È±…‰•±Í	å½µ…¥¸€ô1…‰•±Ì¹±±É½ÕÁÌ(€€€€€€€€€€€€¹M•±•Ñ5…¹ä¡É½ÕÀ€ôøÉ½ÕÀ¤(€€€€€€€€€€€€¹É½ÕÁ	ä¡±…‰•°€ôø±…‰•°¹½µ…¥¸°MÑÉ¥¹½µÁ…É•È¹=É‘¥¹…°¤(€€€€€€€€€€€€¹Q½¥Ñ¥½¹…Éä (€€€€€€€€€€€€€€€É½ÕÀ€ôøÉ½ÕÀ¹-•ä°(€€€€€€€€€€€€€€€É½ÕÀ€ôøÉ½ÕÀ¹M•±•Ğ¡±…‰•°€ôø±…‰•°¹]¥É”¤¹Q½!…Í¡M•Ğ¡MÑÉ¥¹½µÁ…É•È¹=É‘¥¹…°¤°(€€€€€€€€€€€€€€€MÑÉ¥¹½µÁ…É•È¹=É‘¥¹…°¤ì((€€€€€€€™½É•… €¡Ù…È•¹ÑÉä¥¸µ…¹¥™•ÍĞ¹¥áÑÕÉ•Ì¤(€€€€€€€ì(€€€€€€€€€€€Ù…ÈÍ±Õœ€ô•¹ÑÉä¹•ÑMÑÉ¥¹œ ‰Í±Õœˆ¤€üü€‰±¥¹”í•¹ÑÉä¹1¥¹•ôˆì(€€€€€€€€€€€™½É•… €¡Ù…È±…‰•±I•˜¥¸•¹ÑÉä¹•ÑMÑÉ¥¹ÉÉ…ä ‰±…‰•±Ìˆ¤¤(€€€€€€€€€€€ì(€€€€€€€€€€€€€€€Ù…È‘½Ñ%¹‘•à€ô±…‰•±I•˜¹%¹‘•á=˜ œ¸œ°MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…°¤ì(€€€€€€€€€€€€€€€¥˜€¡‘½Ñ%¹‘•à€ğô€Àñğ‘½Ñ%¹‘•à€ôô±…‰•±I•˜¹1•¹Ñ €´€Ä¤(€€€€€€€€€€€€€€€ì(€€€€€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì¹‘¡¹•Ü ‰±…‰•±Ì¹…¹½¹¥…°ˆ°€‰™¥áÑÕÉ”p‰íÍ±Õõpˆ±…‰•°p‰í±…‰•±I•™õpˆµÕÍĞÕÍ”‘½µ…¥¸¹İ¥É”™½Éµ…Ğˆ°5…¹¥™•ÍÑA…Ñ ¤¤ì(€€€€€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”ì(€€€€€€€€€€€€€€€ô((€€€€€€€€€€€€€€€Ù…È‘½µ…¥¸€ô±…‰•±I•™l¸¹‘½Ñ%¹‘•átì(€€€€€€€€€€€€€€€Ù…Èİ¥É”€ô±…‰•±I•™l¡‘½Ñ%¹‘•à€¬€Ä¤¸¹tì(€€€€€€€€€€€€€€€¥˜€ …±…‰•±Í	å½µ…¥¸¹QÉå•ÑY…±Õ”¡‘½µ…¥¸°½ÕĞÙ…ÈÙ…±¥‘1…‰•±Ì¤ñğ€…Ù…±¥‘1…‰•±Ì¹½¹Ñ…¥¹Ì¡İ¥É”¤¤(€€€€€€€€€€€€€€€ì(€€€€€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì¹‘¡¹•Ü ‰±…‰•±Ì¹…¹½¹¥…°ˆ°€‰™¥áÑÕÉ”p‰íÍ±ÕõpˆÉ•™•É•¹•ÌÕ¹­¹½İ¸±…‰•°p‰í±…‰•±I•™õpˆˆ°5…¹¥™•ÍÑA…Ñ ¤¤ì(€€€€€€€€€€€€€€€ô(€€€€€€€€€€€ô(€€€€€€€ô(€€€ô((€€€ÁÉ¥Ù…Ñ”Ù½¥Y…±¥‘…Ñ•‘µ¥¹MÕÉ™…•Ì¡1¥ÍĞñY…±¥‘…Ñ¥½¹…¥±ÕÉ”ø™…¥±ÕÉ•Ì¤(€€€ì(€€€€€€€™½É•… €¡Ù…ÈÍÕÉ™…”¥¸‘µ¥¹MÕÉ™…•Ì¤(€€€€€€€ì(€€€€€€€€€€€¥˜€¡ÍÕÉ™…”¹A…Ñ¡…¹‘¥‘…Ñ•Ì¹¹ä¡Á…Ñ €ôø¥±”¹á¥ÍÑÌ¡Õ±±A…Ñ ¡Á…Ñ ¤¤ñğ¥É•Ñ½Éä¹á¥ÍÑÌ¡Õ±±A…Ñ ¡Á…Ñ ¤¤¤¤(€€€€€€€€€€€ì(€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”ì(€€€€€€€€€€€ô((€€€€€€€€€€€™…¥±ÕÉ•Ì¹‘¡¹•Ü ‰…‘µ¥¸¹¥¹Ñ•É™…”ˆ°€‰µ¥ÍÍ¥¹œíÍÕÉ™…”¹9…µ•ôÍÕÉ™…”ì•áÁ•Ñ•½¹”½˜èíÍÑÉ¥¹œ¹)½¥¸ ˆ°€ˆ°ÍÕÉ™…”¹A…Ñ¡…¹‘¥‘…Ñ•Ì¥ôˆ¤¤ì(€€€€€€€ô(€€€ô((€€€ÁÉ¥Ù…Ñ”Ù½¥Y…±¥‘…Ñ•5¥É…Ñ¥½¹Ì¡1¥ÍĞñY…±¥‘…Ñ¥½¹…¥±ÕÉ”ø™…¥±ÕÉ•Ì¤(€€€ì(€€€€€€€™½É•… €¡Ù…ÈÁ…Ñ ¥¸I•ÅÕ¥É•‘5¥É…Ñ¥½¹Ì¤(€€€€€€€ì(€€€€€€€€€€€¥˜€ …¥±”¹á¥ÍÑÌ¡Õ±±A…Ñ ¡Á…Ñ ¤¤¤(€€€€€€€€€€€ì(€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì¹‘¡¹•Ü ‰µ¥É…Ñ¥½¹Ì¹ÁÉ•Í•¹Ğˆ°€‰µ¥ÍÍ¥¹œÉ•ÅÕ¥É•ME1¥Ñ”µ¥É…Ñ¥½¸èíÁ…Ñ¡ôˆ°Á…Ñ ¤¤ì(€€€€€€€€€€€ô(€€€€€€€ô(€€€ô((€€€ÁÉ¥Ù…Ñ”Ù½¥Y…±¥‘…Ñ•AÉ½©•Ñ1…å½ÕĞ¡1¥ÍĞñY…±¥‘…Ñ¥½¹…¥±ÕÉ”ø™…¥±ÕÉ•Ì¤(€€€ì(€€€€€€€Ù…È½¹ÑÉ…ÑA…Ñ €ô€‰‘½Ì½ÁÉ½©•Ğµ±…å½ÕĞµØÄ¹µˆì(€€€€€€€Ù…È½¹ÑÉ…ÑÕ±±A…Ñ €ôÕ±±A…Ñ ¡½¹ÑÉ…ÑA…Ñ ¤ì(€€€€€€€Ù…È½¹ÑÉ…ÑQ•áĞ€ô¥±”¹á¥ÍÑÌ¡½¹ÑÉ…ÑÕ±±A…Ñ ¤€ü¥±”¹I•…‘±±Q•áĞ¡½¹ÑÉ…ÑÕ±±A…Ñ ¤€èÍÑÉ¥¹œ¹µÁÑäì(€€€€€€€Ù…È­¹½İ¹AÉ½©•ÑA…Ñ¡Ì€ôAÉ½©•Ñ1…å½ÕĞ¹M•±•Ğ¡ÁÉ½©•Ğ€ôøÁÉ½©•Ğ¹A…Ñ ¤¹Q½!…Í¡M•Ğ¡MÑÉ¥¹½µÁ…É•È¹=É‘¥¹…°¤ì((€€€€€€€™½É•… €¡Ù…ÈÁÉ½©•Ğ¥¸AÉ½©•Ñ1…å½ÕĞ¤(€€€€€€€ì(€€€€€€€€€€€¥˜€ …½¹ÑÉ…ÑQ•áĞ¹½¹Ñ…¥¹Ì¡ÁÉ½©•Ğ¹9…µ”°MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…°¤(€€€€€€€€€€€€€€€ñğ€…½¹ÑÉ…ÑQ•áĞ¹½¹Ñ…¥¹Ì¡ÁÉ½©•Ğ¹A…Ñ °MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…°¤¤(€€€€€€€€€€€ì(€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì¹‘¡¹•Ü ‰ÁÉ½©•ÑÌ¹±…å½ÕĞˆ°€‰±…å½ÕĞ½¹ÑÉ…ĞµÕÍĞ‘•±…É”íÁÉ½©•Ğ¹9…µ•ô…ĞíÁÉ½©•Ğ¹A…Ñ¡ôˆ°½¹ÑÉ…ÑA…Ñ ¤¤ì(€€€€€€€€€€€ô((€€€€€€€€€€€¥˜€¡ÁÉ½©•Ğ¹5ÕÍÑá¥ÍĞ€˜˜€…¥±”¹á¥ÍÑÌ¡Õ±±A…Ñ ¡ÁÉ½©•Ğ¹A…Ñ ¤¤¤(€€€€€€€€€€€ì(€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì¹‘¡¹•Ü ‰ÁÉ½©•ÑÌ¹±…å½ÕĞˆ°€‰É•ÅÕ¥É•ÁÉ½©•Ğ¥Ìµ¥ÍÍ¥¹œèíÁÉ½©•Ğ¹A…Ñ¡ôˆ°ÁÉ½©•Ğ¹A…Ñ ¤¤ì(€€€€€€€€€€€ô(€€€€€€€ô((€€€€€€€™½É•… €¡Ù…ÈÁÉ½©•Ñ¥±”¥¸¹Õµ•É…Ñ•AÉ½©•Ñ¥±•Ì ¤¤(€€€€€€€ì(€€€€€€€€€€€¥˜€ …­¹½İ¹AÉ½©•ÑA…Ñ¡Ì¹½¹Ñ…¥¹Ì¡ÁÉ½©•Ñ¥±”¤¤(€€€€€€€€€€€ì(€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì¹‘¡¹•Ü ‰ÁÉ½©•ÑÌ¹±…å½ÕĞˆ°€‰ÁÉ½©•Ğ™¥±”¥Ì½ÕÑÍ¥‘”Ñ¡”ØÄ±…å½ÕĞ½¹ÑÉ…ĞèíÁÉ½©•Ñ¥±•ôˆ°ÁÉ½©•Ñ¥±”¤¤ì(€€€€€€€€€€€ô(€€€€€€€ô(€€€ô((€€€ÁÉ¥Ù…Ñ”%¹Õµ•É…‰±”ñÍÑÉ¥¹œø¹Õµ•É…Ñ•AÉ½©•Ñ¥±•Ì ¤(€€€ì(€€€€€€€™½É•… €¡Ù…È‘¥É•Ñ½Éä¥¸¹•İmtì€‰ÍÉŒˆ°€‰Ñ•ÍÑÌˆ°€‰Ñ½½±Ìˆô¤(€€€€€€€ì(€€€€€€€€€€€Ù…È™Õ±±¥É•Ñ½Éä€ôÕ±±A…Ñ ¡‘¥É•Ñ½Éä¤ì(€€€€€€€€€€€¥˜€ …¥É•Ñ½Éä¹á¥ÍÑÌ¡™Õ±±¥É•Ñ½Éä¤¤(€€€€€€€€€€€ì(€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”ì(€€€€€€€€€€€ô((€€€€€€€€€€€™½É•… €¡Ù…È™¥±”¥¸¥É•Ñ½Éä¹¹Õµ•É…Ñ•¥±•Ì¡™Õ±±¥É•Ñ½Éä°€ˆ¨¹ÍÁÉ½¨ˆ°M•…É¡=ÁÑ¥½¸¹±±¥É•Ñ½É¥•Ì¤¹=É‘•È¡MÑÉ¥¹½µÁ…É•È¹=É‘¥¹…°¤¤(€€€€€€€€€€€ì(€€€€€€€€€€€€€€€å¥•±É•ÑÕÉ¸A…Ñ ¹•ÑI•±…Ñ¥Ù•A…Ñ ¡É½½Ğ°™¥±”¤(€€€€€€€€€€€€€€€€€€€€¹I•Á±…”¡A…Ñ ¹¥É•Ñ½ÉåM•Á…É…Ñ½É¡…È°€œ¼œ¤(€€€€€€€€€€€€€€€€€€€€¹I•Á±…”¡A…Ñ ¹±Ñ¥É•Ñ½ÉåM•Á…É…Ñ½É¡…È°€œ¼œ¤ì(€€€€€€€€€€€ô(€€€€€€€ô(€€€ô((€€€ÁÉ¥Ù…Ñ”%¹Õµ•É…‰±”ñÍÑÉ¥¹œø¹Õµ•É…Ñ•=ÁÑ¥½¹…±M…¹¥±•Ì¡ÍÑÉ¥¹œ‘¥É•Ñ½Éä°ÍÑÉ¥¹œÁ…ÑÑ•É¸¤(€€€ì(€€€€€€€Ù…È™Õ±±¥É•Ñ½Éä€ôÕ±±A…Ñ ¡‘¥É•Ñ½Éä¤ì(€€€€€€€¥˜€ …¥É•Ñ½Éä¹á¥ÍÑÌ¡™Õ±±¥É•Ñ½Éä¤¤(€€€€€€€ì(€€€€€€€€€€€å¥•±‰É•…¬ì(€€€€€€€ô((€€€€€€€™½É•… €¡Ù…È™¥±”¥¸¥É•Ñ½Éä¹¹Õµ•É…Ñ•¥±•Ì¡™Õ±±¥É•Ñ½Éä°Á…ÑÑ•É¸°M•…É¡=ÁÑ¥½¸¹±±¥É•Ñ½É¥•Ì¤¹=É‘•È¡MÑÉ¥¹½µÁ…É•È¹=É‘¥¹…°¤¤(€€€€€€€ì(€€€€€€€€€€€å¥•±É•ÑÕÉ¸A…Ñ ¹•ÑI•±…Ñ¥Ù•A…Ñ ¡É½½Ğ°™¥±”¤¹I•Á±…”¡A…Ñ ¹¥É•Ñ½ÉåM•Á…É…Ñ½É¡…È°€œ¼œ¤ì(€€€€€€€ô(€€€ô((€€€ÁÉ¥Ù…Ñ”ÍÑÉ¥¹œÕ±±A…Ñ ¡ÍÑÉ¥¹œÁ…Ñ ¤€ôøA…Ñ ¹½µ‰¥¹”¡É½½Ğ°Á…Ñ ¤ì((€€€ÁÉ¥Ù…Ñ”ÍÑ…Ñ¥Œ‰½½°%Í1½İ•É…Í•MÑ…‰±”¡ÍÑÉ¥¹œÙ…±Õ”¤€ôø(€€€€€€€Ù…±Õ”¹1•¹Ñ €ø€À€˜˜Ù…±Õ”¹±°¡ €ôø€¡ €øô€„œ€˜˜ €ğô€èœ¤ñğ€¡ €øô€œÀœ€˜˜ €ğô€œäœ¤ñğ €ôô€|œ¤ì)ô()¥¹Ñ•É¹…°ÍÑ…Ñ¥Œ±…ÍÌ5…¹¥™•ÍÑA…ÉÍ•È)ì(€€€ÁÕ‰±¥ŒÍÑ…Ñ¥Œ5…¹¥™•ÍÑ½Õµ•¹ĞA…ÉÍ”¡ÍÑÉ¥¹œÁ…Ñ °%I•…‘=¹±å1¥ÍĞñÍÑÉ¥¹œø±¥¹•Ì¤(€€€ì(€€€€€€€¥¹ĞüÙ•ÉÍ¥½¸€ô¹Õ±°ì(€€€€€€€Ù…ÈÑ…Í­Ì€ô¹•Ü1¥ÍĞñ5…¹¥™•ÍÑ¹ÑÉäø ¤ì(€€€€€€€Ù…È™¥áÑÕÉ•Ì€ô¹•Ü1¥ÍĞñ5…¹¥™•ÍÑ¹ÑÉäø ¤ì(€€€€€€€Ù…È•ÉÉ½ÉÌ€ô¹•Ü1¥ÍĞñÍÑÉ¥¹œø ¤ì(€€€€€€€5…¹¥™•ÍÑ¹ÑÉäüÕÉÉ•¹Ñ¹ÑÉä€ô¹Õ±°ì(€€€€€€€ÍÑÉ¥¹œüÕÉÉ•¹ÑM•Ñ¥½¸€ô¹Õ±°ì((€€€€€€€™½È€¡Ù…È¤€ô€Àì¤€ğ±¥¹•Ì¹½Õ¹Ğì¤¬¬¤(€€€€€€€ì(€€€€€€€€€€€Ù…È±¥¹•9Õµ‰•È€ô¤€¬€Äì(€€€€€€€€€€€Ù…È±¥¹”€ôMÑÉ¥Á½µµ•¹Ğ¡±¥¹•Ím¥t¤¹QÉ¥´ ¤ì(€€€€€€€€€€€¥˜€¡±¥¹”¹1•¹Ñ €ôô€À¤(€€€€€€€€€€€ì(€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”ì(€€€€€€€€€€€ô((€€€€€€€€€€€¥˜€¡±¥¹”¹MÑ…ÉÑÍ]¥Ñ  ‰mlˆ°MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…°¤€˜˜±¥¹”¹¹‘Í]¥Ñ  ‰utˆ°MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…°¤¤(€€€€€€€€€€€ì(€€€€€€€€€€€€€€€ÕÉÉ•¹ÑM•Ñ¥½¸€ô±¥¹•lÈ¸¹xÉt¹QÉ¥´ ¤ì(€€€€€€€€€€€€€€€ÕÉÉ•¹Ñ¹ÑÉä€ô¹•Ü5…¹¥™•ÍÑ¹ÑÉä¡±¥¹•9Õµ‰•È¤ì((€€€€€€€€€€€€€€€Íİ¥Ñ €¡ÕÉÉ•¹ÑM•Ñ¥½¸¤(€€€€€€€€€€€€€€€ì(€€€€€€€€€€€€€€€€€€€…Í”€‰Ñ…Í¬ˆè(€€€€€€€€€€€€€€€€€€€€€€€Ñ…Í­Ì¹‘¡ÕÉÉ•¹Ñ¹ÑÉä¤ì(€€€€€€€€€€€€€€€€€€€€€€€‰É•…¬ì(€€€€€€€€€€€€€€€€€€€…Í”€‰™¥áÑÕÉ”ˆè(€€€€€€€€€€€€€€€€€€€€€€€™¥áÑÕÉ•Ì¹‘¡ÕÉÉ•¹Ñ¹ÑÉä¤ì(€€€€€€€€€€€€€€€€€€€€€€€‰É•…¬ì(€€€€€€€€€€€€€€€€€€€‘•™…Õ±Ğè(€€€€€€€€€€€€€€€€€€€€€€€•ÉÉ½ÉÌ¹‘ ‰íÁ…Ñ¡ôéí±¥¹•9Õµ‰•ÉôèÕ¹­¹½İ¸Í•Ñ¥½¸mmíÕÉÉ•¹ÑM•Ñ¥½¹õutˆ¤ì(€€€€€€€€€€€€€€€€€€€€€€€ÕÉÉ•¹Ñ¹ÑÉä€ô¹Õ±°ì(€€€€€€€€€€€€€€€€€€€€€€€‰É•…¬ì(€€€€€€€€€€€€€€€ô((€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”ì(€€€€€€€€€€€ô((€€€€€€€€€€€Ù…È•ÅÕ…±Í%¹‘•à€ô±¥¹”¹%¹‘•á=˜ œôœ°MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…°¤ì(€€€€€€€€€€€¥˜€¡•ÅÕ…±Í%¹‘•à€ğô€À¤(€€€€€€€€€€€ì(€€€€€€€€€€€€€€€•ÉÉ½ÉÌ¹‘ ‰íÁ…Ñ¡ôéí±¥¹•9Õµ‰•Éôè•áÁ•Ñ•­•ä€ôÙ…±Õ”ˆ¤ì(€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”ì(€€€€€€€€€€€ô((€€€€€€€€€€€Ù…È­•ä€ô±¥¹•l¸¹•ÅÕ…±Í%¹‘•át¹QÉ¥´ ¤ì(€€€€€€€€€€€Ù…ÈÉ…İY…±Õ”€ô±¥¹•l¡•ÅÕ…±Í%¹‘•à€¬€Ä¤¸¹t¹QÉ¥´ ¤ì(€€€€€€€€€€€¥˜€ …%Í-•ä¡­•ä¤¤(€€€€€€€€€€€ì(€€€€€€€€€€€€€€€•ÉÉ½ÉÌ¹‘ ‰íÁ…Ñ¡ôéí±¥¹•9Õµ‰•Éôè¥¹Ù…±¥­•äp‰í­•åõpˆˆ¤ì(€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”ì(€€€€€€€€€€€ô((€€€€€€€€€€€Ù…ÈÙ…±Õ”€ôA…ÉÍ•Y…±Õ”¡Á…Ñ °±¥¹•9Õµ‰•È°É…İY…±Õ”°•ÉÉ½ÉÌ¤ì(€€€€€€€€€€€¥˜€¡ÕÉÉ•¹Ñ¹ÑÉä¥Ì¹Õ±°¤(€€€€€€€€€€€ì(€€€€€€€€€€€€€€€¥˜€ …ÍÑÉ¥¹œ¹ÅÕ…±Ì¡­•ä°€‰Ù•ÉÍ¥½¸ˆ°MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…°¤¤(€€€€€€€€€€€€€€€ì(€€€€€€€€€€€€€€€€€€€•ÉÉ½ÉÌ¹‘ ‰íÁ…Ñ¡ôéí±¥¹•9Õµ‰•ÉôèÑ½Àµ±•Ù•°­•äp‰í­•åõpˆ¥Ì¹½ĞÍÕÁÁ½ÉÑ•ˆ¤ì(€€€€€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”ì(€€€€€€€€€€€€€€€ô((€€€€€€€€€€€€€€€¥˜€¡Ù…±Õ”¥Ì¥¹ĞÁ…ÉÍ•‘Y•ÉÍ¥½¸¤(€€€€€€€€€€€€€€€ì(€€€€€€€€€€€€€€€€€€€Ù•ÉÍ¥½¸€ôÁ…ÉÍ•‘Y•ÉÍ¥½¸ì(€€€€€€€€€€€€€€€ô(€€€€€€€€€€€€€€€•±Í”(€€€€€€€€€€€€€€€ì(€€€€€€€€€€€€€€€€€€€•ÉÉ½ÉÌ¹‘ ‰íÁ…Ñ¡ôéí±¥¹•9Õµ‰•ÉôèÙ•ÉÍ¥½¸µÕÍĞ‰”…¸¥¹Ñ••Èˆ¤ì(€€€€€€€€€€€€€€€ô((€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”ì(€€€€€€€€€€€ô((€€€€€€€€€€€¥˜€¡ÕÉÉ•¹ÑM•Ñ¥½¸¥Ì¹½Ğ€ ‰Ñ…Í¬ˆ½È€‰™¥áÑÕÉ”ˆ¤¤(€€€€€€€€€€€ì(€€€€€€€€€€€€€€€•ÉÉ½ÉÌ¹‘ ‰íÁ…Ñ¡ôéí±¥¹•9Õµ‰•Éôè­•ä½ÕÑÍ¥‘”ÍÕÁÁ½ÉÑ•Í•Ñ¥½¸ˆ¤ì(€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”ì(€€€€€€€€€€€ô((€€€€€€€€€€€ÕÉÉ•¹Ñ¹ÑÉä¹M•Ğ¡­•ä°Ù…±Õ”¤ì(€€€€€€€ô((€€€€€€€É•ÑÕÉ¸¹•Ü5…¹¥™•ÍÑ½Õµ•¹Ğ¡Ù•ÉÍ¥½¸°Ñ…Í­Ì°™¥áÑÕÉ•Ì°•ÉÉ½ÉÌ¤ì(€€€ô((€€€ÁÉ¥Ù…Ñ”ÍÑ…Ñ¥Œ½‰©•ĞüA…ÉÍ•Y…±Õ”¡ÍÑÉ¥¹œÁ…Ñ °¥¹Ğ±¥¹•9Õµ‰•È°ÍÑÉ¥¹œÉ…İY…±Õ”°1¥ÍĞñÍÑÉ¥¹œø•ÉÉ½ÉÌ¤(€€€ì(€€€€€€€¥˜€¡É…İY…±Õ”¹MÑ…ÉÑÍ]¥Ñ  ‰pˆˆ°MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…°¤€˜˜É…İY…±Õ”¹¹‘Í]¥Ñ  ‰pˆˆ°MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…°¤€˜˜É…İY…±Õ”¹1•¹Ñ €øô€È¤(€€€€€€€ì(€€€€€€€€€€€É•ÑÕÉ¸É…İY…±Õ•lÄ¸¹xÅtì(€€€€€€€ô((€€€€€€€¥˜€¡É…İY…±Õ”¥Ì€‰ÑÉÕ”ˆ½È€‰™…±Í”ˆ¤(€€€€€€€ì(€€€€€€€€€€€É•ÑÕÉ¸ÍÑÉ¥¹œ¹ÅÕ…±Ì¡É…İY…±Õ”°€‰ÑÉÕ”ˆ°MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…°¤ì(€€€€€€€ô((€€€€€€€¥˜€¡É…İY…±Õ”¹MÑ…ÉÑÍ]¥Ñ  ‰lˆ°MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…°¤€˜˜É…İY…±Õ”¹¹‘Í]¥Ñ  ‰tˆ°MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…°¤¤(€€€€€€€ì(€€€€€€€€€€€É•ÑÕÉ¸A…ÉÍ•MÑÉ¥¹ÉÉ…ä¡Á…Ñ °±¥¹•9Õµ‰•È°É…İY…±Õ”°•ÉÉ½ÉÌ¤ì(€€€€€€€ô((€€€€€€€¥˜€¡¥¹Ğ¹QÉåA…ÉÍ”¡É…İY…±Õ”°½ÕĞÙ…È¥¹Ñ••È¤¤(€€€€€€€ì(€€€€€€€€€€€É•ÑÕÉ¸¥¹Ñ••Èì(€€€€€€€ô((€€€€€€€•ÉÉ½ÉÌ¹‘ ‰íÁ…Ñ¡ôéí±¥¹•9Õµ‰•ÉôèÕ¹ÍÕÁÁ½ÉÑ•Ù…±Õ”p‰íÉ…İY…±Õ•õpˆˆ¤ì(€€€€€€€É•ÑÕÉ¸¹Õ±°ì(€€€ô((€€€ÁÉ¥Ù…Ñ”ÍÑ…Ñ¥Œ%I•…‘=¹±å1¥ÍĞñÍÑÉ¥¹œøA…ÉÍ•MÑÉ¥¹ÉÉ…ä¡ÍÑÉ¥¹œÁ…Ñ °¥¹Ğ±¥¹•9Õµ‰•È°ÍÑÉ¥¹œÉ…İY…±Õ”°1¥ÍĞñÍÑÉ¥¹œø•ÉÉ½ÉÌ¤(€€€ì(€€€€€€€Ù…È¥¹¹•È€ôÉ…İY…±Õ•lÄ¸¹xÅt¹QÉ¥´ ¤ì(€€€€€€€¥˜€¡¥¹¹•È¹1•¹Ñ €ôô€À¤(€€€€€€€ì(€€€€€€€€€€€É•ÑÕÉ¸mtì(€€€€€€€ô((€€€€€€€Ù…ÈÙ…±Õ•Ì€ô¹•Ü1¥ÍĞñÍÑÉ¥¹œø ¤ì(€€€€€€€™½É•… €¡Ù…ÈÁ…ÉĞ¥¸¥¹¹•È¹MÁ±¥Ğ œ°œ°MÑÉ¥¹MÁ±¥Ñ=ÁÑ¥½¹Ì¹QÉ¥µ¹ÑÉ¥•Ì¤¤(€€€€€€€ì(€€€€€€€€€€€¥˜€ …Á…ÉĞ¹MÑ…ÉÑÍ]¥Ñ  ‰pˆˆ°MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…°¤ñğ€…Á…ÉĞ¹¹‘Í]¥Ñ  ‰pˆˆ°MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…°¤ñğÁ…ÉĞ¹1•¹Ñ €ğ€È¤(€€€€€€€€€€€ì(€€€€€€€€€€€€€€€•ÉÉ½ÉÌ¹‘ ‰íÁ…Ñ¡ôéí±¥¹•9Õµ‰•Éôè…ÉÉ…åÌµÕÍĞ½¹Ñ…¥¸ÅÕ½Ñ•ÍÑÉ¥¹Ìˆ¤ì(€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”ì(€€€€€€€€€€€ô((€€€€€€€€€€€Ù…±Õ•Ì¹‘¡Á…ÉÑlÄ¸¹xÅt¤ì(€€€€€€€ô((€€€€€€€É•ÑÕÉ¸Ù…±Õ•Ìì(€€€ô((€€€ÁÉ¥Ù…Ñ”ÍÑ…Ñ¥ŒÍÑÉ¥¹œMÑÉ¥Á½µµ•¹Ğ¡ÍÑÉ¥¹œ±¥¹”¤(€€€ì(€€€€€€€Ù…È¥¹MÑÉ¥¹œ€ô™…±Í”ì(€€€€€€€™½È€¡Ù…È¤€ô€Àì¤€ğ±¥¹”¹1•¹Ñ ì¤¬¬¤(€€€€€€€ì(€€€€€€€€€€€¥˜€¡±¥¹•m¥t€ôô€œˆœ¤(€€€€€€€€€€€ì(€€€€€€€€€€€€€€€¥¹MÑÉ¥¹œ€ô€…¥¹MÑÉ¥¹œì(€€€€€€€€€€€ô(€€€€€€€€€€€•±Í”¥˜€¡±¥¹•m¥t€ôô€œŒœ€˜˜€…¥¹MÑÉ¥¹œ¤(€€€€€€€€€€€ì(€€€€€€€€€€€€€€€É•ÑÕÉ¸±¥¹•l¸¹¥tì(€€€€€€€€€€€ô(€€€€€€€ô((€€€€€€€É•ÑÕÉ¸±¥¹”ì(€€€ô((€€€ÁÉ¥Ù…Ñ”ÍÑ…Ñ¥Œ‰½½°%Í-•ä¡ÍÑÉ¥¹œ­•ä¤€ôø(€€€€€€€­•ä¹1•¹Ñ €ø€À€˜˜­•ä¹±°¡ €ôø€¡ €øô€„œ€˜˜ €ğô€èœ¤ñğ€¡ €øô€œ€˜˜ €ğô€hœ¤ñğ€¡ €øô€œÀœ€˜˜ €ğô€œäœ¤ñğ €ôô€|œ¤ì)ô()¥¹Ñ•É¹…°Í•…±•É•½É5…¹¥™•ÍÑ½Õµ•¹Ğ (€€€¥¹ĞüY•ÉÍ¥½¸°(€€€%I•…‘=¹±å1¥ÍĞñ5…¹¥™•ÍÑ¹ÑÉäøQ…Í­Ì°(€€€%I•…‘=¹±å1¥ÍĞñ5…¹¥™•ÍÑ¹ÑÉäø¥áÑÕÉ•Ì°(€€€%I•…‘=¹±å1¥ÍĞñÍÑÉ¥¹œøÉÉ½ÉÌ¤ì()¥¹Ñ•É¹…°Í•…±•±…ÍÌ5…¹¥™•ÍÑ¹ÑÉä¡¥¹Ğ±¥¹”¤)ì(€€€ÁÉ¥Ù…Ñ”É•…‘½¹±ä¥Ñ¥½¹…ÉäñÍÑÉ¥¹œ°½‰©•Ğüø™¥•±‘Ì€ô¹•Ü¡MÑÉ¥¹½µÁ…É•È¹=É‘¥¹…°¤ì((€€€ÁÕ‰±¥Œ¥¹Ğ1¥¹”ì•Ğìô€ô±¥¹”ì((€€€ÁÕ‰±¥ŒÙ½¥M•Ğ¡ÍÑÉ¥¹œ­•ä°½‰©•ĞüÙ…±Õ”¤€ôø™¥•±‘Ím­•åt€ôÙ…±Õ”ì((€€€ÁÕ‰±¥ŒÍÑÉ¥¹œü•ÑMÑÉ¥¹œ¡ÍÑÉ¥¹œ­•ä¤€ôø™¥•±‘Ì¹QÉå•ÑY…±Õ”¡­•ä°½ÕĞÙ…ÈÙ…±Õ”¤€üÙ…±Õ”…ÌÍÑÉ¥¹œ€è¹Õ±°ì((€€€ÁÕ‰±¥Œ‰½½°ü•Ñ	½½±•…¸¡ÍÑÉ¥¹œ­•ä¤€ôø™¥•±‘Ì¹QÉå•ÑY…±Õ”¡­•ä°½ÕĞÙ…ÈÙ…±Õ”¤€üÙ…±Õ”…Ì‰½½°ü€è¹Õ±°ì((€€€ÁÕ‰±¥Œ%I•…‘=¹±å1¥ÍĞñÍÑÉ¥¹œø•ÑMÑÉ¥¹ÉÉ…ä¡ÍÑÉ¥¹œ­•ä¤€ôø(€€€€€€€™¥•±‘Ì¹QÉå•ÑY…±Õ”¡­•ä°½ÕĞÙ…ÈÙ…±Õ”¤€˜˜Ù…±Õ”¥Ì%I•…‘=¹±å1¥ÍĞñÍÑÉ¥¹œøÍÑÉ¥¹Ì€üÍÑÉ¥¹Ì€èmtì)ô()¥¹Ñ•É¹…°Í•…±•É•½ÉI•ÅÕ¥É•‘¥áÑÕÉ”¡ÍÑÉ¥¹œM±Õœ°ÍÑÉ¥¹œ9…µ”¤ì()¥¹Ñ•É¹…°Í•…±•É•½ÉI•ÅÕ¥É•‘Q…Í¬¡ÍÑÉ¥¹œM±Õœ°ÍÑÉ¥¹œ9…µ”¤ì()¥¹Ñ•É¹…°Í•…±•É•½ÉI•ÅÕ¥É•‘MÕÉ™…”¡ÍÑÉ¥¹œ9…µ”°%I•…‘=¹±å1¥ÍĞñÍÑÉ¥¹œøA…Ñ¡…¹‘¥‘…Ñ•Ì¤ì()¥¹Ñ•É¹…°Í•…±•É•½ÉI•ÅÕ¥É•‘AÉ½©•Ğ¡ÍÑÉ¥¹œ9…µ”°ÍÑÉ¥¹œA…Ñ °‰½½°5ÕÍÑá¥ÍĞ¤ì()¥¹Ñ•É¹…°Í•…±•É•½ÉY…±¥‘…Ñ¥½¹…¥±ÕÉ”¡ÍÑÉ¥¹œ¡•­%°ÍÑÉ¥¹œ5•ÍÍ…”°ÍÑÉ¥¹œüA…Ñ €ô¹Õ±°¤)ì(€€€ÁÕ‰±¥ŒÍÑÉ¥¹œQ½¥ÍÁ±…åMÑÉ¥¹œ ¤€ôø€‰í¡•­%‘ôèí5•ÍÍ…•ôˆì)ô(
+        new("Hedgehog.Head", "src/Hedgehog.Head/Hedgehog.Head.csproj", true),
+        new("Hedgehog.Agent.Core", "src/Hedgehog.Agent.Core/Hedgehog.Agent.Core.csproj", true),
+        new("Hedgehog.Agent.Store", "src/Hedgehog.Agent.Store/Hedgehog.Agent.Store.csproj", true),
+        new("Hedgehog.StorageAgent", "src/Hedgehog.StorageAgent/Hedgehog.StorageAgent.csproj", true),
+        new("Hedgehog.Repair", "src/Hedgehog.Repair/Hedgehog.Repair.csproj", false),
+        new("Hedgehog.Client", "src/Hedgehog.Client/Hedgehog.Client.csproj", true),
+        new("Hedgehog.LocalRuntime", "src/Hedgehog.LocalRuntime/Hedgehog.LocalRuntime.csproj", true),
+        new("Hedgehog.LocalRuntime.Api", "src/Hedgehog.LocalRuntime.Api/Hedgehog.LocalRuntime.Api.csproj", true),
+        new("Hedgehog.Metadata.Core.Tests", "tests/Hedgehog.Metadata.Core.Tests/Hedgehog.Metadata.Core.Tests.csproj", true),
+        new("Hedgehog.Metadata.Sqlite.Tests", "tests/Hedgehog.Metadata.Sqlite.Tests/Hedgehog.Metadata.Sqlite.Tests.csproj", true),
+        new("Hedgehog.Admin.Api.Tests", "tests/Hedgehog.Admin.Api.Tests/Hedgehog.Admin.Api.Tests.csproj", true),
+        new("Hedgehog.Head.Tests", "tests/Hedgehog.Head.Tests/Hedgehog.Head.Tests.csproj", false),
+        new("Hedgehog.StorageAgent.Tests", "tests/Hedgehog.StorageAgent.Tests/Hedgehog.StorageAgent.Tests.csproj", false),
+        new("Hedgehog.Repair.Tests", "tests/Hedgehog.Repair.Tests/Hedgehog.Repair.Tests.csproj", false),
+        new("Hedgehog.Client.Tests", "tests/Hedgehog.Client.Tests/Hedgehog.Client.Tests.csproj", false),
+        new("Hedgehog.LocalRuntime.Tests", "tests/Hedgehog.LocalRuntime.Tests/Hedgehog.LocalRuntime.Tests.csproj", true),
+        new("Hedgehog.Xtask", "tools/Hedgehog.Xtask/Hedgehog.Xtask.csproj", true),
+    ];
+
+    private static readonly Regex SlugPattern = new("^[a-z0-9_]+$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    public IReadOnlyList<ValidationFailure> Validate()
+    {
+        var failures = new List<ValidationFailure>();
+
+        ValidateDocs(failures);
+        ValidateLabels(failures);
+        ValidateQuarantine(failures);
+
+        var manifest = ValidateManifestShape(failures);
+        if (manifest is not null)
+        {
+            ValidateRequiredTasks(manifest, failures);
+            ValidateRequiredFixtures(manifest, failures);
+            ValidateManifestLabels(manifest, failures);
+        }
+
+        ValidateAdminSurfaces(failures);
+        ValidateMigrations(failures);
+        ValidateProjectLayout(failures);
+
+        return failures
+            .OrderBy(failure => failure.CheckId, StringComparer.Ordinal)
+            .ThenBy(failure => failure.Message, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private void ValidateDocs(List<ValidationFailure> failures)
+    {
+        foreach (var path in RequiredDocs)
+        {
+            if (!File.Exists(FullPath(path)))
+            {
+                failures.Add(new("docs.required", $"missing required doc: {path}", path));
+            }
+        }
+
+        foreach (var (path, phrase) in RequiredPhrases)
+        {
+            var fullPath = FullPath(path);
+            if (!File.Exists(fullPath))
+            {
+                failures.Add(new("docs.required_phrase", $"missing required phrase source: {path}", path));
+                continue;
+            }
+
+            var text = File.ReadAllText(fullPath);
+            if (!text.Contains(phrase, StringComparison.Ordinal))
+            {
+                failures.Add(new("docs.required_phrase", $"{path} missing required phrase: {phrase}", path));
+            }
+        }
+    }
+
+    private static void ValidateLabels(List<ValidationFailure> failures)
+    {
+        foreach (var group in Labels.AllGroups)
+        {
+            foreach (var label in group)
+            {
+                if (!IsLowercaseStable(label.Wire))
+                {
+                    failures.Add(new("labels.canonical", $"{label.Domain} label is not lowercase wire format: {label.Wire}"));
+                }
+            }
+        }
+    }
+
+    private void ValidateQuarantine(List<ValidationFailure> failures)
+    {
+        foreach (var path in QuarantineScanFiles.Concat(EnumerateOptionalScanFiles("fixtures", "*.toml")))
+        {
+            var fullPath = FullPath(path);
+            if (!File.Exists(fullPath))
+            {
+                continue;
+            }
+
+            var text = File.ReadAllText(fullPath);
+            foreach (var token in QuarantinedTokens)
+            {
+                if (text.Contains(token, StringComparison.Ordinal))
+                {
+                    failures.Add(new("labels.uppercase_quarantine", $"{path} contains quarantined token: {token}", path));
+                }
+            }
+        }
+    }
+
+    private ManifestDocument? ValidateManifestShape(List<ValidationFailure> failures)
+    {
+        var fullPath = FullPath(ManifestPath);
+        if (!File.Exists(fullPath))
+        {
+            if (allowMissingScaffold)
+            {
+                return null;
+            }
+
+            failures.Add(new("fixtures.manifest", $"missing fixture manifest: {ManifestPath}", ManifestPath));
+            return null;
+        }
+
+        var manifest = ManifestParser.Parse(ManifestPath, File.ReadAllLines(fullPath));
+        foreach (var error in manifest.Errors)
+        {
+            failures.Add(new("fixtures.manifest", error, ManifestPath));
+        }
+
+        if (manifest.Version != 1)
+        {
+            failures.Add(new("fixtures.manifest", $"{ManifestPath} must set version = 1", ManifestPath));
+        }
+
+        ValidateEntryShape("task", manifest.Tasks, failures);
+        ValidateEntryShape("fixture", manifest.Fixtures, failures);
+
+        return manifest;
+    }
+
+    private static void ValidateEntryShape(string section, IReadOnlyList<ManifestEntry> entries, List<ValidationFailure> failures)
+    {
+        foreach (var entry in entries)
+        {
+            var slug = entry.GetString("slug");
+            if (string.IsNullOrWhiteSpace(slug))
+            {
+                failures.Add(new("fixtures.manifest", $"{section} at line {entry.Line} is missing slug", ManifestPath));
+            }
+            else if (!SlugPattern.IsMatch(slug))
+            {
+                failures.Add(new("fixtures.manifest", $"{section} \"{slug}\" has non-stable slug; use lowercase letters, digits, and underscores only", ManifestPath));
+            }
+
+            RequireString(section, entry, "name", failures);
+            RequireString(section, entry, "owner", failures);
+
+            if (section == "fixture")
+            {
+                RequireString(section, entry, "scenario", failures);
+                if (entry.GetBoolean("beta_blocker") != true)
+                {
+                    failures.Add(new("fixtures.manifest", $"fixture \"{slug ?? $"line {entry.Line}"}\" must set beta_blocker = true", ManifestPath));
+                }
+            }
+            else if (section == "task")
+            {
+                RequireString(section, entry, "status", failures);
+                if (entry.GetBoolean("v1_required") != true)
+                {
+                    failures.Add(new("runtime.tasks", $"task \"{slug ?? $"line {entry.Line}"}\" must set v1_required = true", ManifestPath));
+                }
+            }
+        }
+    }
+
+    private static void RequireString(string section, ManifestEntry entry, string key, List<ValidationFailure> failures)
+    {
+        if (string.IsNullOrWhiteSpace(entry.GetString(key)))
+        {
+            failures.Add(new("fixtures.manifest", $"{section} \"{entry.GetString("slug") ?? $"line {entry.Line}"}\" is missing {key}", ManifestPath));
+        }
+    }
+
+    private static void ValidateRequiredTasks(ManifestDocument manifest, List<ValidationFailure> failures)
+    {
+        var bySlug = IndexEntriesBySlug("task", manifest.Tasks, failures);
+
+        foreach (var task in RequiredTasks)
+        {
+            if (!bySlug.TryGetValue(task.Slug, out var entry))
+            {
+                failures.Add(new("runtime.tasks", $"missing local runtime task \"{task.Name}\" (slug {task.Slug})", ManifestPath));
+                continue;
+            }
+
+            if (entry.GetBoolean("v1_required") != true)
+            {
+                failures.Add(new("runtime.tasks", $"local runtime task \"{task.Slug}\" must be v1_required", ManifestPath));
+            }
+        }
+    }
+
+    private static void ValidateRequiredFixtures(ManifestDocument manifest, List<ValidationFailure> failures)
+    {
+        var bySlug = IndexEntriesBySlug("fixture", manifest.Fixtures, failures);
+
+        foreach (var fixture in RequiredFixtures)
+        {
+            if (!bySlug.TryGetValue(fixture.Slug, out var entry))
+            {
+                failures.Add(new("fixtures.present", $"missing beta fixture \"{fixture.Name}\" (slug {fixture.Slug})", ManifestPath));
+                continue;
+            }
+
+            if (!string.Equals(entry.GetString("scenario"), fixture.Name, StringComparison.Ordinal))
+            {
+                failures.Add(new("fixtures.present", $"fixture \"{fixture.Slug}\" must use scenario \"{fixture.Name}\"", ManifestPath));
+            }
+
+            if (entry.GetBoolean("beta_blocker") != true)
+            {
+                failures.Add(new("fixtures.present", $"fixture \"{fixture.Slug}\" must be marked beta_blocker", ManifestPath));
+            }
+        }
+    }
+
+    private static Dictionary<string, ManifestEntry> IndexEntriesBySlug(
+        string section,
+        IReadOnlyList<ManifestEntry> entries,
+        List<ValidationFailure> failures)
+    {
+        var bySlug = new Dictionary<string, ManifestEntry>(StringComparer.Ordinal);
+        foreach (var entry in entries)
+        {
+            var slug = entry.GetString("slug");
+            if (string.IsNullOrWhiteSpace(slug))
+            {
+                continue;
+            }
+
+            if (!bySlug.TryAdd(slug, entry))
+            {
+                failures.Add(new("fixtures.manifest", $"duplicate {section} slug \"{slug}\"", ManifestPath));
+            }
+        }
+
+        return bySlug;
+    }
+
+    private static void ValidateManifestLabels(ManifestDocument manifest, List<ValidationFailure> failures)
+    {
+        var labelsByDomain = Labels.AllGroups
+            .SelectMany(group => group)
+            .GroupBy(label => label.Domain, StringComparer.Ordinal)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Select(label => label.Wire).ToHashSet(StringComparer.Ordinal),
+                StringComparer.Ordinal);
+
+        foreach (var entry in manifest.Fixtures)
+        {
+            var slug = entry.GetString("slug") ?? $"line {entry.Line}";
+            foreach (var labelRef in entry.GetStringArray("labels"))
+            {
+                var dotIndex = labelRef.IndexOf('.', StringComparison.Ordinal);
+                if (dotIndex <= 0 || dotIndex == labelRef.Length - 1)
+                {
+                    failures.Add(new("labels.canonical", $"fixture \"{slug}\" label \"{labelRef}\" must use domain.wire format", ManifestPath));
+                    continue;
+                }
+
+                var domain = labelRef[..dotIndex];
+                var wire = labelRef[(dotIndex + 1)..];
+                if (!labelsByDomain.TryGetValue(domain, out var validLabels) || !validLabels.Contains(wire))
+                {
+                    failures.Add(new("labels.canonical", $"fixture \"{slug}\" references unknown label \"{labelRef}\"", ManifestPath));
+                }
+            }
+        }
+    }
+
+    private void ValidateAdminSurfaces(List<ValidationFailure> failures)
+    {
+        foreach (var surface in AdminSurfaces)
+        {
+            if (surface.PathCandidates.Any(path => File.Exists(FullPath(path)) || Directory.Exists(FullPath(path))))
+            {
+                continue;
+            }
+
+            failures.Add(new("admin.interface", $"missing {surface.Name} surface; expected one of: {string.Join(", ", surface.PathCandidates)}"));
+        }
+    }
+
+    private void ValidateMigrations(List<ValidationFailure> failures)
+    {
+        foreach (var path in RequiredMigrations)
+        {
+            if (!File.Exists(FullPath(path)))
+            {
+                failures.Add(new("migrations.present", $"missing required SQLite migration: {path}", path));
+            }
+        }
+    }
+
+    private void ValidateProjectLayout(List<ValidationFailure> failures)
+    {
+        var contractPath = "docs/project-layout-v1.md";
+        var contractFullPath = FullPath(contractPath);
+        var contractText = File.Exists(contractFullPath) ? File.ReadAllText(contractFullPath) : string.Empty;
+        var knownProjectPaths = ProjectLayout.Select(project => project.Path).ToHashSet(StringComparer.Ordinal);
+
+        foreach (var project in ProjectLayout)
+        {
+            if (!contractText.Contains(project.Name, StringComparison.Ordinal)
+                || !contractText.Contains(project.Path, StringComparison.Ordinal))
+            {
+                failures.Add(new("projects.layout", $"layout contract must declare {project.Name} at {project.Path}", contractPath));
+            }
+
+            if (project.MustExist && !File.Exists(FullPath(project.Path)))
+            {
+                failures.Add(new("projects.layout", $"required project is missing: {project.Path}", project.Path));
+            }
+        }
+
+        foreach (var projectFile in EnumerateProjectFiles())
+        {
+            if (!knownProjectPaths.Contains(projectFile))
+            {
+                failures.Add(new("projects.layout", $"project file is outside the v1 layout contract: {projectFile}", projectFile));
+            }
+        }
+    }
+
+    private IEnumerable<string> EnumerateProjectFiles()
+    {
+        foreach (var directory in new[] { "src", "tests", "tools" })
+        {
+            var fullDirectory = FullPath(directory);
+            if (!Directory.Exists(fullDirectory))
+            {
+                continue;
+            }
+
+            foreach (var file in Directory.EnumerateFiles(fullDirectory, "*.csproj", SearchOption.AllDirectories).Order(StringComparer.Ordinal))
+            {
+                yield return Path.GetRelativePath(root, file)
+                    .Replace(Path.DirectorySeparatorChar, '/')
+                    .Replace(Path.AltDirectorySeparatorChar, '/');
+            }
+        }
+    }
+
+    private IEnumerable<string> EnumerateOptionalScanFiles(string directory, string pattern)
+    {
+        var fullDirectory = FullPath(directory);
+        if (!Directory.Exists(fullDirectory))
+        {
+            yield break;
+        }
+
+        foreach (var file in Directory.EnumerateFiles(fullDirectory, pattern, SearchOption.AllDirectories).Order(StringComparer.Ordinal))
+        {
+            yield return Path.GetRelativePath(root, file).Replace(Path.DirectorySeparatorChar, '/');
+        }
+    }
+
+    private string FullPath(string path) => Path.Combine(root, path);
+
+    private static bool IsLowercaseStable(string value) =>
+        value.Length > 0 && value.All(ch => (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_');
+}
+
+internal static class ManifestParser
+{
+    public static ManifestDocument Parse(string path, IReadOnlyList<string> lines)
+    {
+        int? version = null;
+        var tasks = new List<ManifestEntry>();
+        var fixtures = new List<ManifestEntry>();
+        var errors = new List<string>();
+        ManifestEntry? currentEntry = null;
+        string? currentSection = null;
+
+        for (var i = 0; i < lines.Count; i++)
+        {
+            var lineNumber = i + 1;
+            var line = StripComment(lines[i]).Trim();
+            if (line.Length == 0)
+            {
+                continue;
+            }
+
+            if (line.StartsWith("[[", StringComparison.Ordinal) && line.EndsWith("]]", StringComparison.Ordinal))
+            {
+                currentSection = line[2..^2].Trim();
+                currentEntry = new ManifestEntry(lineNumber);
+
+                switch (currentSection)
+                {
+                    case "task":
+                        tasks.Add(currentEntry);
+                        break;
+                    case "fixture":
+                        fixtures.Add(currentEntry);
+                        break;
+                    default:
+                        errors.Add($"{path}:{lineNumber}: unknown section [[{currentSection}]]");
+                        currentEntry = null;
+                        break;
+                }
+
+                continue;
+            }
+
+            var equalsIndex = line.IndexOf('=', StringComparison.Ordinal);
+            if (equalsIndex <= 0)
+            {
+                errors.Add($"{path}:{lineNumber}: expected key = value");
+                continue;
+            }
+
+            var key = line[..equalsIndex].Trim();
+            var rawValue = line[(equalsIndex + 1)..].Trim();
+            if (!IsKey(key))
+            {
+                errors.Add($"{path}:{lineNumber}: invalid key \"{key}\"");
+                continue;
+            }
+
+            var value = ParseValue(path, lineNumber, rawValue, errors);
+            if (currentEntry is null)
+            {
+                if (!string.Equals(key, "version", StringComparison.Ordinal))
+                {
+                    errors.Add($"{path}:{lineNumber}: top-level key \"{key}\" is not supported");
+                    continue;
+                }
+
+                if (value is int parsedVersion)
+                {
+                    version = parsedVersion;
+                }
+                else
+                {
+                    errors.Add($"{path}:{lineNumber}: version must be an integer");
+                }
+
+                continue;
+            }
+
+            if (currentSection is not ("task" or "fixture"))
+            {
+                errors.Add($"{path}:{lineNumber}: key outside supported section");
+                continue;
+            }
+
+            currentEntry.Set(key, value);
+        }
+
+        return new ManifestDocument(version, tasks, fixtures, errors);
+    }
+
+    private static object? ParseValue(string path, int lineNumber, string rawValue, List<string> errors)
+    {
+        if (rawValue.StartsWith("\"", StringComparison.Ordinal) && rawValue.EndsWith("\"", StringComparison.Ordinal) && rawValue.Length >= 2)
+        {
+            return rawValue[1..^1];
+        }
+
+        if (rawValue is "true" or "false")
+        {
+            return string.Equals(rawValue, "true", StringComparison.Ordinal);
+        }
+
+        if (rawValue.StartsWith("[", StringComparison.Ordinal) && rawValue.EndsWith("]", StringComparison.Ordinal))
+        {
+            return ParseStringArray(path, lineNumber, rawValue, errors);
+        }
+
+        if (int.TryParse(rawValue, out var integer))
+        {
+            return integer;
+        }
+
+        errors.Add($"{path}:{lineNumber}: unsupported value \"{rawValue}\"");
+        return null;
+    }
+
+    private static IReadOnlyList<string> ParseStringArray(string path, int lineNumber, string rawValue, List<string> errors)
+    {
+        var inner = rawValue[1..^1].Trim();
+        if (inner.Length == 0)
+        {
+            return [];
+        }
+
+        var values = new List<string>();
+        foreach (var part in inner.Split(',', StringSplitOptions.TrimEntries))
+        {
+            if (!part.StartsWith("\"", StringComparison.Ordinal) || !part.EndsWith("\"", StringComparison.Ordinal) || part.Length < 2)
+            {
+                errors.Add($"{path}:{lineNumber}: arrays must contain quoted strings");
+                continue;
+            }
+
+            values.Add(part[1..^1]);
+        }
+
+        return values;
+    }
+
+    private static string StripComment(string line)
+    {
+        var inString = false;
+        for (var i = 0; i < line.Length; i++)
+        {
+            if (line[i] == '"')
+            {
+                inString = !inString;
+            }
+            else if (line[i] == '#' && !inString)
+            {
+                return line[..i];
+            }
+        }
+
+        return line;
+    }
+
+    private static bool IsKey(string key) =>
+        key.Length > 0 && key.All(ch => (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_');
+}
+
+internal sealed record ManifestDocument(
+    int? Version,
+    IReadOnlyList<ManifestEntry> Tasks,
+    IReadOnlyList<ManifestEntry> Fixtures,
+    IReadOnlyList<string> Errors);
+
+internal sealed class ManifestEntry(int line)
+{
+    private readonly Dictionary<string, object?> fields = new(StringComparer.Ordinal);
+
+    public int Line { get; } = line;
+
+    public void Set(string key, object? value) => fields[key] = value;
+
+    public string? GetString(string key) => fields.TryGetValue(key, out var value) ? value as string : null;
+
+    public bool? GetBoolean(string key) => fields.TryGetValue(key, out var value) ? value as bool? : null;
+
+    public IReadOnlyList<string> GetStringArray(string key) =>
+        fields.TryGetValue(key, out var value) && value is IReadOnlyList<string> strings ? strings : [];
+}
+
+internal sealed record RequiredFixture(string Slug, string Name);
+
+internal sealed record RequiredTask(string Slug, string Name);
+
+internal sealed record RequiredSurface(string Name, IReadOnlyList<string> PathCandidates);
+
+internal sealed record RequiredProject(string Name, string Path, bool MustExist);
+
+internal sealed record ValidationFailure(string CheckId, string Message, string? Path = null)
+{
+    public string ToDisplayString() => $"{CheckId}: {Message}";
+}
