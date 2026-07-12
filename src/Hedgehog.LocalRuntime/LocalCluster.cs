@@ -1,3 +1,6 @@
+Exit code: 0
+Wall time: 0.6 seconds
+Output:
 using System.Security.Cryptography;
 using Hedgehog.Agent.Core;
 using Hedgehog.Agent.Store;
@@ -305,6 +308,8 @@ public sealed class LocalCluster : IAsyncDisposable
         {
             await connection.DisposeAsync().ConfigureAwait(false);
         }
+
+        SqliteConnection.ClearAllPools();
     }
 
     private string ConnectionString => new SqliteConnectionStringBuilder
@@ -362,3 +367,4 @@ public sealed class LocalCluster : IAsyncDisposable
         return $"{tenantId}/{datasetId}";
     }
 }
+
