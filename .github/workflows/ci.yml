@@ -46,3 +46,6 @@ jobs:
 
       - name: Run Local Runtime Stress
         run: dotnet run --project tools/Hedgehog.Xtask -- run-local-runtime-stress
+
+      - name: Run Local Restore Drill
+        run: dotnet run --project tools/Hedgehog.Xtask -- run-local-restore-drill

@@ -6,7 +6,7 @@ using Hedgehog.Types;
 var parsedCommand = CommandLine.Parse(args);
 if (parsedCommand is null)
 {
-    Console.Error.WriteLine("usage: dotnet run --project tools/Hedgehog.Xtask -- <validate-scaffold-contract|run-local-runtime-smoke|run-local-runtime-stress> [--json] [--allow-missing-scaffold] [--runtime-root <path>] [--tenant-count <n>] [--objects-per-tenant <n>] [--payload-bytes <n>]");
+    Console.Error.WriteLine("usage: dotnet run --project tools/Hedgehog.Xtask -- <validate-scaffold-contract|run-local-runtime-smoke|run-local-runtime-stress|run-local-restore-drill> [--json] [--allow-missing-scaffold] [--runtime-root <path>] [--restore-runtime-root <path>] [--tenant-count <n>] [--objects-per-tenant <n>] [--payload-bytes <n>]");
     return 2;
 }
 
@@ -99,6 +99,56 @@ if (parsedCommand.Command == "run-local-runtime-stress")
     return 0;
 }
 
+if (parsedCommand.Command == "run-local-restore-drill")
+{
+    var useDefaultRuntimeRoots = parsedCommand.RuntimeRoot is null && parsedCommand.RestoreRuntimeRoot is null;
+    var sourceRuntimeRoot = parsedCommand.RuntimeRoot
+        ?? Path.Combine(Directory.GetCurrentDirectory(), ".hedgehog", "local-restore-drill-source");
+    var restoredRuntimeRoot = parsedCommand.RestoreRuntimeRoot
+        ?? Path.Combine(Directory.GetCurrentDirectory(), ".hedgehog", "local-restore-drill-restored");
+
+    foreach (var runtimeRoot in new[] { sourceRuntimeRoot, restoredRuntimeRoot })
+    {
+        if (!Directory.Exists(runtimeRoot))
+        {
+            continue;
+        }
+
+        if (!useDefaultRuntimeRoots)
+        {
+            Console.Error.WriteLine($"custom runtime root already exists and will not be deleted automatically: {runtimeRoot}");
+            return 1;
+        }
+
+        Directory.Delete(runtimeRoot, recursive: true);
+    }
+
+    var result = await LocalRuntimeRestoreDrill.RunAsync(
+        LocalClusterOptions.CreateDefault(sourceRuntimeRoot),
+        restoredRuntimeRoot);
+
+    if (parsedCommand.Json)
+    {
+        Console.WriteLine(JsonSerializer.Serialize(result, jsonOptions));
+    }
+    else
+    {
+        Console.WriteLine("local restore drill passed");
+        Console.WriteLine($"source_runtime_root={result.SourceRuntimeRoot}");
+        Console.WriteLine($"restored_runtime_root={result.RestoredRuntimeRoot}");
+        Console.WriteLine($"objects_written_before_backup={result.ObjectsWrittenBeforeBackup}");
+        Console.WriteLine($"reads_verified_after_restore={result.ReadsVerifiedAfterRestore}");
+        Console.WriteLine($"delete_verified_after_restore={result.DeleteVerifiedAfterRestore}");
+        Console.WriteLine($"objects_written_after_restore={result.ObjectsWrittenAfterRestore}");
+        Console.WriteLine($"metadata_object_rows={result.MetadataObjectRows}");
+        Console.WriteLine($"metadata_version_rows={result.MetadataVersionRows}");
+        Console.WriteLine($"healthy_replica_rows={result.HealthyReplicaRows}");
+        Console.WriteLine($"delete_marker_rows={result.DeleteMarkerRows}");
+    }
+
+    return 0;
+}
+
 var validator = new ScaffoldContractValidator(Directory.GetCurrentDirectory(), parsedCommand.AllowMissingScaffold);
 var failures = validator.Validate();
 
@@ -136,13 +186,14 @@ internal sealed record CommandLine(
     bool Json,
     bool AllowMissingScaffold,
     string? RuntimeRoot,
+    string? RestoreRuntimeRoot,
     int? TenantCount,
     int? ObjectsPerTenant,
     int? PayloadBytes)
 {
     public static CommandLine? Parse(string[] args)
     {
-        if (args.Length == 0 || args[0] is not ("validate-scaffold-contract" or "run-local-runtime-smoke" or "run-local-runtime-stress"))
+        if (args.Length == 0 || args[0] is not ("validate-scaffold-contract" or "run-local-runtime-smoke" or "run-local-runtime-stress" or "run-local-restore-drill"))
         {
             return null;
         }
@@ -151,6 +202,7 @@ internal sealed record CommandLine(
         var json = false;
         var allowMissingScaffold = false;
         string? runtimeRoot = null;
+        string? restoreRuntimeRoot = null;
         int? tenantCount = null;
         int? objectsPerTenant = null;
         int? payloadBytes = null;
@@ -172,6 +224,14 @@ internal sealed record CommandLine(
                     }
 
                     runtimeRoot = args[++i];
+                    break;
+                case "--restore-runtime-root":
+                    if (i + 1 >= args.Length)
+                    {
+                        return null;
+                    }
+
+                    restoreRuntimeRoot = args[++i];
                     break;
                 case "--tenant-count":
                     if (i + 1 >= args.Length || !TryPositiveInt(args[++i], out tenantCount))
@@ -199,7 +259,7 @@ internal sealed record CommandLine(
             }
         }
 
-        return new CommandLine(command, json, allowMissingScaffold, runtimeRoot, tenantCount, objectsPerTenant, payloadBytes);
+        return new CommandLine(command, json, allowMissingScaffold, runtimeRoot, restoreRuntimeRoot, tenantCount, objectsPerTenant, payloadBytes);
     }
 
     private static bool TryPositiveInt(string value, out int? parsed)
@@ -318,576 +378,4 @@ internal sealed class ScaffoldContractValidator(string root, bool allowMissingSc
         new("Hedgehog.Types", "src/Hedgehog.Types/Hedgehog.Types.csproj", true),
         new("Hedgehog.Crypto", "src/Hedgehog.Crypto/Hedgehog.Crypto.csproj", true),
         new("Hedgehog.Metadata.Core", "src/Hedgehog.Metadata.Core/Hedgehog.Metadata.Core.csproj", true),
-        new("Hedgehog.Metadata.Sqlite", "src/Hedgehog.Metadata.Sqlite/Hedgehog.Metadata.Sqlite.csproj", true),
-        new("Hedgehog.Admin.Api", "src/Hedgehog.Admin.Api/Hedgehog.Admin.Api.csproj", true),
-        new("Hedgehog.Admin.Ui", "src/Hedgehog.Admin.Ui/Hedgehog.Admin.Ui.csproj", true),
-        new("Hedgehog.Head", "src/Hedgehog.Head/Hedgehog.Head.csproj", true),
-        new("Hedgehog.Agent.Core", "src/Hedgehog.Agent.Core/Hedgehog.Agent.Core.csproj", true),
-        new("Hedgehog.Agent.Store", "src/Hedgehog.Agent.Store/Hedgehog.Agent.Store.csproj", true),
-        new("Hedgehog.StorageAgent", "src/Hedgehog.StorageAgent/Hedgehog.StorageAgent.csproj", true),
-        new("Hedgehog.Repair", "src/Hedgehog.Repair/Hedgehog.Repair.csproj", false),
-        new("Hedgehog.Client", "src/Hedgehog.Client/Hedgehog.Client.csproj", true),
-        new("Hedgehog.LocalRuntime", "src/Hedgehog.LocalRuntime/Hedgehog.LocalRuntime.csproj", true),
-        new("Hedgehog.LocalRuntime.Api", "src/Hedgehog.LocalRuntime.Api/Hedgehog.LocalRuntime.Api.csproj", true),
-        new("Hedgehog.Metadata.Core.Tests", "tests/Hedgehog.Metadata.Core.Tests/Hedgehog.Metadata.Core.Tests.csproj", true),
-        new("Hedgehog.Metadata.Sqlite.Tests", "tests/Hedgehog.Metadata.Sqlite.Tests/Hedgehog.Metadata.Sqlite.Tests.csproj", true),
-        new("Hedgehog.Admin.Api.Tests", "tests/Hedgehog.Admin.Api.Tests/Hedgehog.Admin.Api.Tests.csproj", true),
-        new("Hedgehog.Head.Tests", "tests/Hedgehog.Head.Tests/Hedgehog.Head.Tests.csproj", false),
-        new("Hedgehog.StorageAgent.Tests", "tests/Hedgehog.StorageAgent.Tests/Hedgehog.StorageAgent.Tests.csproj", false),
-        new("Hedgehog.Repair.Tests", "tests/Hedgehog.Repair.Tests/Hedgehog.Repair.Tests.csproj", false),
-        new("Hedgehog.Client.Tests", "tests/Hedgehog.Client.Tests/Hedgehog.Client.Tests.csproj", false),
-        new("Hedgehog.LocalRuntime.Tests", "tests/Hedgehog.LocalRuntime.Tests/Hedgehog.LocalRuntime.Tests.csproj", true),
-        new("Hedgehog.Xtask", "tools/Hedgehog.Xtask/Hedgehog.Xtask.csproj", true),
-    ];
-
-    private static readonly Regex SlugPattern = new("^[a-z0-9_]+$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
-
-    public IReadOnlyList<ValidationFailure> Validate()
-    {
-        var failures = new List<ValidationFailure>();
-
-        ValidateDocs(failures);
-        ValidateLabels(failures);
-        ValidateQuarantine(failures);
-
-        var manifest = ValidateManifestShape(failures);
-        if (manifest is not null)
-        {
-            ValidateRequiredTasks(manifest, failures);
-            ValidateRequiredFixtures(manifest, failures);
-            ValidateManifestLabels(manifest, failures);
-        }
-
-        ValidateAdminSurfaces(failures);
-        ValidateMigrations(failures);
-        ValidateProjectLayout(failures);
-
-        return failures
-            .OrderBy(failure => failure.CheckId, StringComparer.Ordinal)
-            .ThenBy(failure => failure.Message, StringComparer.Ordinal)
-            .ToArray();
-    }
-
-    private void ValidateDocs(List<ValidationFailure> failures)
-    {
-        foreach (var path in RequiredDocs)
-        {
-            if (!File.Exists(FullPath(path)))
-            {
-                failures.Add(new("docs.required", $"missing required doc: {path}", path));
-            }
-        }
-
-        foreach (var (path, phrase) in RequiredPhrases)
-        {
-            var fullPath = FullPath(path);
-            if (!File.Exists(fullPath))
-            {
-                failures.Add(new("docs.required_phrase", $"missing required phrase source: {path}", path));
-                continue;
-            }
-
-            var text = File.ReadAllText(fullPath);
-            if (!text.Contains(phrase, StringComparison.Ordinal))
-            {
-                failures.Add(new("docs.required_phrase", $"{path} missing required phrase: {phrase}", path));
-            }
-        }
-    }
-
-    private static void ValidateLabels(List<ValidationFailure> failures)
-    {
-        foreach (var group in Labels.AllGroups)
-        {
-            foreach (var label in group)
-            {
-                if (!IsLowercaseStable(label.Wire))
-                {
-                    failures.Add(new("labels.canonical", $"{label.Domain} label is not lowercase wire format: {label.Wire}"));
-                }
-            }
-        }
-    }
-
-    private void ValidateQuarantine(List<ValidationFailure> failures)
-    {
-        foreach (var path in QuarantineScanFiles.Concat(EnumerateOptionalScanFiles("fixtures", "*.toml")))
-        {
-            var fullPath = FullPath(path);
-            if (!File.Exists(fullPath))
-            {
-                continue;
-            }
-
-            var text = File.ReadAllText(fullPath);
-            foreach (var token in QuarantinedTokens)
-            {
-                if (text.Contains(token, StringComparison.Ordinal))
-                {
-                    failures.Add(new("labels.uppercase_quarantine", $"{path} contains quarantined token: {token}", path));
-                }
-            }
-        }
-    }
-
-    private ManifestDocument? ValidateManifestShape(List<ValidationFailure> failures)
-    {
-        var fullPath = FullPath(ManifestPath);
-        if (!File.Exists(fullPath))
-        {
-            if (allowMissingScaffold)
-            {
-                return null;
-            }
-
-            failures.Add(new("fixtures.manifest", $"missing fixture manifest: {ManifestPath}", ManifestPath));
-            return null;
-        }
-
-        var manifest = ManifestParser.Parse(ManifestPath, File.ReadAllLines(fullPath));
-        foreach (var error in manifest.Errors)
-        {
-            failures.Add(new("fixtures.manifest", error, ManifestPath));
-        }
-
-        if (manifest.Version != 1)
-        {
-            failures.Add(new("fixtures.manifest", $"{ManifestPath} must set version = 1", ManifestPath));
-        }
-
-        ValidateEntryShape("task", manifest.Tasks, failures);
-        ValidateEntryShape("fixture", manifest.Fixtures, failures);
-
-        return manifest;
-    }
-
-    private static void ValidateEntryShape(string section, IReadOnlyList<ManifestEntry> entries, List<ValidationFailure> failures)
-    {
-        foreach (var entry in entries)
-        {
-            var slug = entry.GetString("slug");
-            if (string.IsNullOrWhiteSpace(slug))
-            {
-                failures.Add(new("fixtures.manifest", $"{section} at line {entry.Line} is missing slug", ManifestPath));
-            }
-            else if (!SlugPattern.IsMatch(slug))
-            {
-                failures.Add(new("fixtures.manifest", $"{section} \"{slug}\" has non-stable slug; use lowercase letters, digits, and underscores only", ManifestPath));
-            }
-
-            RequireString(section, entry, "name", failures);
-            RequireString(section, entry, "owner", failures);
-
-            if (section == "fixture")
-            {
-                RequireString(section, entry, "scenario", failures);
-                if (entry.GetBoolean("beta_blocker") != true)
-                {
-                    failures.Add(new("fixtures.manifest", $"fixture \"{slug ?? $"line {entry.Line}"}\" must set beta_blocker = true", ManifestPath));
-                }
-            }
-            else if (section == "task")
-            {
-                RequireString(section, entry, "status", failures);
-                if (entry.GetBoolean("v1_required") != true)
-                {
-                    failures.Add(new("runtime.tasks", $"task \"{slug ?? $"line {entry.Line}"}\" must set v1_required = true", ManifestPath));
-                }
-            }
-        }
-    }
-
-    private static void RequireString(string section, ManifestEntry entry, string key, List<ValidationFailure> failures)
-    {
-        if (string.IsNullOrWhiteSpace(entry.GetString(key)))
-        {
-            failures.Add(new("fixtures.manifest", $"{section} \"{entry.GetString("slug") ?? $"line {entry.Line}"}\" is missing {key}", ManifestPath));
-        }
-    }
-
-    private static void ValidateRequiredTasks(ManifestDocument manifest, List<ValidationFailure> failures)
-    {
-        var bySlug = IndexEntriesBySlug("task", manifest.Tasks, failures);
-
-        foreach (var task in RequiredTasks)
-        {
-            if (!bySlug.TryGetValue(task.Slug, out var entry))
-            {
-                failures.Add(new("runtime.tasks", $"missing local runtime task \"{task.Name}\" (slug {task.Slug})", ManifestPath));
-                continue;
-            }
-
-            if (entry.GetBoolean("v1_required") != true)
-            {
-                failures.Add(new("runtime.tasks", $"local runtime task \"{task.Slug}\" must be v1_required", ManifestPath));
-            }
-        }
-    }
-
-    private static void ValidateRequiredFixtures(ManifestDocument manifest, List<ValidationFailure> failures)
-    {
-        var bySlug = IndexEntriesBySlug("fixture", manifest.Fixtures, failures);
-
-        foreach (var fixture in RequiredFixtures)
-        {
-            if (!bySlug.TryGetValue(fixture.Slug, out var entry))
-            {
-                failures.Add(new("fixtures.present", $"missing beta fixture \"{fixture.Name}\" (slug {fixture.Slug})", ManifestPath));
-                continue;
-            }
-
-            if (!string.Equals(entry.GetString("scenario"), fixture.Name, StringComparison.Ordinal))
-            {
-                failures.Add(new("fixtures.present", $"fixture \"{fixture.Slug}\" must use scenario \"{fixture.Name}\"", ManifestPath));
-            }
-
-            if (entry.GetBoolean("beta_blocker") != true)
-            {
-                failures.Add(new("fixtures.present", $"fixture \"{fixture.Slug}\" must be marked beta_blocker", ManifestPath));
-            }
-        }
-    }
-
-    private static Dictionary<string, ManifestEntry> IndexEntriesBySlug(
-        string section,
-        IReadOnlyList<ManifestEntry> entries,
-        List<ValidationFailure> failures)
-    {
-        var bySlug = new Dictionary<string, ManifestEntry>(StringComparer.Ordinal);
-        foreach (var entry in entries)
-        {
-            var slug = entry.GetString("slug");
-            if (string.IsNullOrWhiteSpace(slug))
-            {
-                continue;
-            }
-
-            if (!bySlug.TryAdd(slug, entry))
-            {
-                failures.Add(new("fixtures.manifest", $"duplicate {section} slug \"{slug}\"", ManifestPath));
-            }
-        }
-
-        return bySlug;
-    }
-
-    private static void ValidateManifestLabels(ManifestDocument manifest, List<ValidationFailure> failures)
-    {
-        var labelsByDomain = Labels.AllGroups
-            .SelectMany(group => group)
-            .GroupBy(label => label.Domain, StringComparer.Ordinal)
-            .ToDictionary(
-                group => group.Key,
-                group => group.Select(label => label.Wire).ToHashSet(StringComparer.Ordinal),
-                StringComparer.Ordinal);
-
-        foreach (var entry in manifest.Fixtures)
-        {
-            var slug = entry.GetString("slug") ?? $"line {entry.Line}";
-            foreach (var labelRef in entry.GetStringArray("labels"))
-            {
-                var dotIndex = labelRef.IndexOf('.', StringComparison.Ordinal);
-                if (dotIndex <= 0 || dotIndex == labelRef.Length - 1)
-                {
-                    failures.Add(new("labels.canonical", $"fixture \"{slug}\" label \"{labelRef}\" must use domain.wire format", ManifestPath));
-                    continue;
-                }
-
-                var domain = labelRef[..dotIndex];
-                var wire = labelRef[(dotIndex + 1)..];
-                if (!labelsByDomain.TryGetValue(domain, out var validLabels) || !validLabels.Contains(wire))
-                {
-                    failures.Add(new("labels.canonical", $"fixture \"{slug}\" references unknown label \"{labelRef}\"", ManifestPath));
-                }
-            }
-        }
-    }
-
-    private void ValidateAdminSurfaces(List<ValidationFailure> failures)
-    {
-        foreach (var surface in AdminSurfaces)
-        {
-            if (surface.PathCandidates.Any(path => File.Exists(FullPath(path)) || Directory.Exists(FullPath(path))))
-            {
-                continue;
-            }
-
-            failures.Add(new("admin.interface", $"missing {surface.Name} surface; expected one of: {string.Join(", ", surface.PathCandidates)}"));
-        }
-    }
-
-    private void ValidateMigrations(List<ValidationFailure> failures)
-    {
-        foreach (var path in RequiredMigrations)
-        {
-            if (!File.Exists(FullPath(path)))
-            {
-                failures.Add(new("migrations.present", $"missing required SQLite migration: {path}", path));
-            }
-        }
-    }
-
-    private void ValidateProjectLayout(List<ValidationFailure> failures)
-    {
-        var contractPath = "docs/project-layout-v1.md";
-        var contractFullPath = FullPath(contractPath);
-        var contractText = File.Exists(contractFullPath) ? File.ReadAllText(contractFullPath) : string.Empty;
-        var knownProjectPaths = ProjectLayout.Select(project => project.Path).ToHashSet(StringComparer.Ordinal);
-
-        foreach (var project in ProjectLayout)
-        {
-            if (!contractText.Contains(project.Name, StringComparison.Ordinal)
-                || !contractText.Contains(project.Path, StringComparison.Ordinal))
-            {
-                failures.Add(new("projects.layout", $"layout contract must declare {project.Name} at {project.Path}", contractPath));
-            }
-
-            if (project.MustExist && !File.Exists(FullPath(project.Path)))
-            {
-                failures.Add(new("projects.layout", $"required project is missing: {project.Path}", project.Path));
-            }
-        }
-
-        foreach (var projectFile in EnumerateProjectFiles())
-        {
-            if (!knownProjectPaths.Contains(projectFile))
-            {
-                failures.Add(new("projects.layout", $"project file is outside the v1 layout contract: {projectFile}", projectFile));
-            }
-        }
-    }
-
-    private IEnumerable<string> EnumerateProjectFiles()
-    {
-        foreach (var directory in new[] { "src", "tests", "tools" })
-        {
-            var fullDirectory = FullPath(directory);
-            if (!Directory.Exists(fullDirectory))
-            {
-                continue;
-            }
-
-            foreach (var file in Directory.EnumerateFiles(fullDirectory, "*.csproj", SearchOption.AllDirectories).Order(StringComparer.Ordinal))
-            {
-                yield return Path.GetRelativePath(root, file)
-                    .Replace(Path.DirectorySeparatorChar, '/')
-                    .Replace(Path.AltDirectorySeparatorChar, '/');
-            }
-        }
-    }
-
-    private IEnumerable<string> EnumerateOptionalScanFiles(string directory, string pattern)
-    {
-        var fullDirectory = FullPath(directory);
-        if (!Directory.Exists(fullDirectory))
-        {
-            yield break;
-        }
-
-        foreach (var file in Directory.EnumerateFiles(fullDirectory, pattern, SearchOption.AllDirectories).Order(StringComparer.Ordinal))
-        {
-            yield return Path.GetRelativePath(root, file).Replace(Path.DirectorySeparatorChar, '/');
-        }
-    }
-
-    private string FullPath(string path) => Path.Combine(root, path);
-
-    private static bool IsLowercaseStable(string value) =>
-        value.Length > 0 && value.All(ch => (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_');
-}
-
-internal static class ManifestParser
-{
-    public static ManifestDocument Parse(string path, IReadOnlyList<string> lines)
-    {
-        int? version = null;
-        var tasks = new List<ManifestEntry>();
-        var fixtures = new List<ManifestEntry>();
-        var errors = new List<string>();
-        ManifestEntry? currentEntry = null;
-        string? currentSection = null;
-
-        for (var i = 0; i < lines.Count; i++)
-        {
-            var lineNumber = i + 1;
-            var line = StripComment(lines[i]).Trim();
-            if (line.Length == 0)
-            {
-                continue;
-            }
-
-            if (line.StartsWith("[[", StringComparison.Ordinal) && line.EndsWith("]]", StringComparison.Ordinal))
-            {
-                currentSection = line[2..^2].Trim();
-                currentEntry = new ManifestEntry(lineNumber);
-
-                switch (currentSection)
-                {
-                    case "task":
-                        tasks.Add(currentEntry);
-                        break;
-                    case "fixture":
-                        fixtures.Add(currentEntry);
-                        break;
-                    default:
-                        errors.Add($"{path}:{lineNumber}: unknown section [[{currentSection}]]");
-                        currentEntry = null;
-                        break;
-                }
-
-                continue;
-            }
-
-            var equalsIndex = line.IndexOf('=', StringComparison.Ordinal);
-            if (equalsIndex <= 0)
-            {
-                errors.Add($"{path}:{lineNumber}: expected key = value");
-                continue;
-            }
-
-            var key = line[..equalsIndex].Trim();
-            var rawValue = line[(equalsIndex + 1)..].Trim();
-            if (!IsKey(key))
-            {
-                errors.Add($"{path}:{lineNumber}: invalid key \"{key}\"");
-                continue;
-            }
-
-            var value = ParseValue(path, lineNumber, rawValue, errors);
-            if (currentEntry is null)
-            {
-                if (!string.Equals(key, "version", StringComparison.Ordinal))
-                {
-                    errors.Add($"{path}:{lineNumber}: top-level key \"{key}\" is not supported");
-                    continue;
-                }
-
-                if (value is int parsedVersion)
-                {
-                    version = parsedVersion;
-                }
-                else
-                {
-                    errors.Add($"{path}:{lineNumber}: version must be an integer");
-                }
-
-                continue;
-            }
-
-            if (currentSection is not ("task" or "fixture"))
-            {
-                errors.Add($"{path}:{lineNumber}: key outside supported section");
-                continue;
-            }
-
-            currentEntry.Set(key, value);
-        }
-
-        return new ManifestDocument(version, tasks, fixtures, errors);
-    }
-
-    private static object? ParseValue(string path, int lineNumber, string rawValue, List<string> errors)
-    {
-        if (rawValue.StartsWith("\"", StringComparison.Ordinal) && rawValue.EndsWith("\"", StringComparison.Ordinal) && rawValue.Length >= 2)
-        {
-            return rawValue[1..^1];
-        }
-
-        if (rawValue is "true" or "false")
-        {
-            return string.Equals(rawValue, "true", StringComparison.Ordinal);
-        }
-
-        if (rawValue.StartsWith("[", StringComparison.Ordinal) && rawValue.EndsWith("]", StringComparison.Ordinal))
-        {
-            return ParseStringArray(path, lineNumber, rawValue, errors);
-        }
-
-        if (int.TryParse(rawValue, out var integer))
-        {
-            return integer;
-        }
-
-        errors.Add($"{path}:{lineNumber}: unsupported value \"{rawValue}\"");
-        return null;
-    }
-
-    private static IReadOnlyList<string> ParseStringArray(string path, int lineNumber, string rawValue, List<string> errors)
-    {
-        var inner = rawValue[1..^1].Trim();
-        if (inner.Length == 0)
-        {
-            return [];
-        }
-
-        var values = new List<string>();
-        foreach (var part in inner.Split(',', StringSplitOptions.TrimEntries))
-        {
-            if (!part.StartsWith("\"", StringComparison.Ordinal) || !part.EndsWith("\"", StringComparison.Ordinal) || part.Length < 2)
-            {
-                errors.Add($"{path}:{lineNumber}: arrays must contain quoted strings");
-                continue;
-            }
-
-            values.Add(part[1..^1]);
-        }
-
-        return values;
-    }
-
-    private static string StripComment(string line)
-    {
-        var inString = false;
-        for (var i = 0; i < line.Length; i++)
-        {
-            if (line[i] == '"')
-            {
-                inString = !inString;
-            }
-            else if (line[i] == '#' && !inString)
-            {
-                return line[..i];
-            }
-        }
-
-        return line;
-    }
-
-    private static bool IsKey(string key) =>
-        key.Length > 0 && key.All(ch => (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_');
-}
-
-internal sealed record ManifestDocument(
-    int? Version,
-    IReadOnlyList<ManifestEntry> Tasks,
-    IReadOnlyList<ManifestEntry> Fixtures,
-    IReadOnlyList<string> Errors);
-
-internal sealed class ManifestEntry(int line)
-{
-    private readonly Dictionary<string, object?> fields = new(StringComparer.Ordinal);
-
-    public int Line { get; } = line;
-
-    public void Set(string key, object? value) => fields[key] = value;
-
-    public string? GetString(string key) => fields.TryGetValue(key, out var value) ? value as string : null;
-
-    public bool? GetBoolean(string key) => fields.TryGetValue(key, out var value) ? value as bool? : null;
-
-    public IReadOnlyList<string> GetStringArray(string key) =>
-        fields.TryGetValue(key, out var value) && value is IReadOnlyList<string> strings ? strings : [];
-}
-
-internal sealed record RequiredFixture(string Slug, string Name);
-
-internal sealed record RequiredTask(string Slug, string Name);
-
-internal sealed record RequiredSurface(string Name, IReadOnlyList<string> PathCandidates);
-
-internal sealed record RequiredProject(string Name, string Path, bool MustExist);
-
-internal sealed record ValidationFailure(string CheckId, string Message, string? Path = null)
-{
-    public string ToDisplayString() => $"{CheckId}: {Message}";
-}
+        new("Hedgehog.Metadata.Sqlite", "src/Hedgehog.Metadata.Sqlite/Hedgehog.MetadatÛü¶‰ËkºwµçaÍ•Ñ¥½¸€ôô€‰Ñ…Í¬ˆ¤4(€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€I•ÅÕ¥É•MÑÉ¥¹œ¡Í•Ñ¥½¸°•¹ÑÉä°€‰ÍÑ…ÑÕÌˆ°™…¥±ÕÉ•Ì¤ì4(€€€€€€€€€€€€€€€¥˜€¡•¹ÑÉä¹•Ñ	½½±•…¸ ‰ØÅ}É•ÅÕ¥É•ˆ¤€„ôÑÉÕ”¤4(€€€€€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì¹‘¡¹•Ü ‰ÉÕ¹Ñ¥µ”¹Ñ…Í­Ìˆ°€‰Ñ…Í¬p‰íÍ±Õœ€üü€‰±¥¹”í•¹ÑÉä¹1¥¹•ô‰õpˆµÕÍĞÍ•ĞØÅ}É•ÅÕ¥É•€ôÑÉÕ”ˆ°5…¹¥™•ÍÑA…Ñ ¤¤ì4(€€€€€€€€€€€€€€€ô4(€€€€€€€€€€€ô4(€€€€€€€ô4(€€€ô4(4(€€€ÁÉ¥Ù…Ñ”ÍÑ…Ñ¥ŒÙ½¥I•ÅÕ¥É•MÑÉ¥¹œ¡ÍÑÉ¥¹œÍ•Ñ¥½¸°5…¹¥™•ÍÑ¹ÑÉä•¹ÑÉä°ÍÑÉ¥¹œ­•ä°1¥ÍĞñY…±¥‘…Ñ¥½¹…¥±ÕÉ”ø™…¥±ÕÉ•Ì¤4(€€€ì4(€€€€€€€¥˜€¡ÍÑÉ¥¹œ¹%Í9Õ±±=É]¡¥Ñ•MÁ…”¡•¹ÑÉä¹•ÑMÑÉ¥¹œ¡­•ä¤¤¤4(€€€€€€€ì4(€€€€€€€€€€€™…¥±ÕÉ•Ì¹‘¡¹•Ü ‰™¥áÑÕÉ•Ì¹µ…¹¥™•ÍĞˆ°€‰íÍ•Ñ¥½¹ôp‰í•¹ÑÉä¹•ÑMÑÉ¥¹œ ‰Í±Õœˆ¤€üü€‰±¥¹”í•¹ÑÉä¹1¥¹•ô‰õpˆ¥Ìµ¥ÍÍ¥¹œí­•åôˆ°5…¹¥™•ÍÑA…Ñ ¤¤ì4(€€€€€€€ô4(€€€ô4(4(€€€ÁÉ¥Ù…Ñ”ÍÑ…Ñ¥ŒÙ½¥Y…±¥‘…Ñ•I•ÅÕ¥É•‘Q…Í­Ì¡5…¹¥™•ÍÑ½Õµ•¹Ğµ…¹¥™•ÍĞ°1¥ÍĞñY…±¥‘…Ñ¥½¹…¥±ÕÉ”ø™…¥±ÕÉ•Ì¤4(€€€ì4(€€€€€€€Ù…È‰åM±Õœ€ô%¹‘•á¹ÑÉ¥•Í	åM±Õœ ‰Ñ…Í¬ˆ°µ…¹¥™•ÍĞ¹Q…Í­Ì°™…¥±ÕÉ•Ì¤ì4(4(€€€€€€€™½É•… €¡Ù…ÈÑ…Í¬¥¸I•ÅÕ¥É•‘Q…Í­Ì¤4(€€€€€€€ì4(€€€€€€€€€€€¥˜€ …‰åM±Õœ¹QÉå•ÑY…±Õ”¡Ñ…Í¬¹M±Õœ°½ÕĞÙ…È•¹ÑÉä¤¤4(€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì¹‘¡¹•Ü ‰ÉÕ¹Ñ¥µ”¹Ñ…Í­Ìˆ°€‰µ¥ÍÍ¥¹œ±½…°ÉÕ¹Ñ¥µ”Ñ…Í¬p‰íÑ…Í¬¹9…µ•õpˆ€¡Í±ÕœíÑ…Í¬¹M±Õô¤ˆ°5…¹¥™•ÍÑA…Ñ ¤¤ì4(€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”ì4(€€€€€€€€€€€ô4(4(€€€€€€€€€€€¥˜€¡•¹ÑÉä¹•Ñ	½½±•…¸ ‰ØÅ}É•ÅÕ¥É•ˆ¤€„ôÑÉÕ”¤4(€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì¹‘¡¹•Ü ‰ÉÕ¹Ñ¥µ”¹Ñ…Í­Ìˆ°€‰±½…°ÉÕ¹Ñ¥µ”Ñ…Í¬p‰íÑ…Í¬¹M±ÕõpˆµÕÍĞ‰”ØÅ}É•ÅÕ¥É•ˆ°5…¹¥™•ÍÑA…Ñ ¤¤ì4(€€€€€€€€€€€ô4(€€€€€€€ô4(€€€ô4(4(€€€ÁÉ¥Ù…Ñ”ÍÑ…Ñ¥ŒÙ½¥Y…±¥‘…Ñ•I•ÅÕ¥É•‘¥áÑÕÉ•Ì¡5…¹¥™•ÍÑ½Õµ•¹Ğµ…¹¥™•ÍĞ°1¥ÍĞñY…±¥‘…Ñ¥½¹…¥±ÕÉ”ø™…¥±ÕÉ•Ì¤4(€€€ì4(€€€€€€€Ù…È‰åM±Õœ€ô%¹‘•á¹ÑÉ¥•Í	åM±Õœ ‰™¥áÑÕÉ”ˆ°µ…¹¥™•ÍĞ¹¥áÑÕÉ•Ì°™…¥±ÕÉ•Ì¤ì4(4(€€€€€€€™½É•… €¡Ù…È™¥áÑÕÉ”¥¸I•ÅÕ¥É•‘¥áÑÕÉ•Ì¤4(€€€€€€€ì4(€€€€€€€€€€€¥˜€ …‰åM±Õœ¹QÉå•ÑY…±Õ”¡™¥áÑÕÉ”¹M±Õœ°½ÕĞÙ…È•¹ÑÉä¤¤4(€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì¹‘¡¹•Ü ‰™¥áÑÕÉ•Ì¹ÁÉ•Í•¹Ğˆ°€‰µ¥ÍÍ¥¹œ‰•Ñ„™¥áÑÕÉ”p‰í™¥áÑÕÉ”¹9…µ•õpˆ€¡Í±Õœí™¥áÑÕÉ”¹M±Õô¤ˆ°5…¹¥™•ÍÑA…Ñ ¤¤ì4(€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”ì4(€€€€€€€€€€€ô4(4(€€€€€€€€€€€¥˜€ …ÍÑÉ¥¹œ¹ÅÕ…±Ì¡•¹ÑÉä¹•ÑMÑÉ¥¹œ ‰Í•¹…É¥¼ˆ¤°™¥áÑÕÉ”¹9…µ”°MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…°¤¤4(€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì¹‘¡¹•Ü ‰™¥áÑÕÉ•Ì¹ÁÉ•Í•¹Ğˆ°€‰™¥áÑÕÉ”p‰í™¥áÑÕÉ”¹M±ÕõpˆµÕÍĞÕÍ”Í•¹…É¥¼p‰í™¥áÑÕÉ”¹9…µ•õpˆˆ°5…¹¥™•ÍÑA…Ñ ¤¤ì4(€€€€€€€€€€€ô4(4(€€€€€€€€€€€¥˜€¡•¹ÑÉä¹•Ñ	½½±•…¸ ‰‰•Ñ…}‰±½­•Èˆ¤€„ôÑÉÕ”¤4(€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì¹‘¡¹•Ü ‰™¥áÑÕÉ•Ì¹ÁÉ•Í•¹Ğˆ°€‰™¥áÑÕÉ”p‰í™¥áÑÕÉ”¹M±ÕõpˆµÕÍĞ‰”µ…É­•‰•Ñ…}‰±½­•Èˆ°5…¹¥™•ÍÑA…Ñ ¤¤ì4(€€€€€€€€€€€ô4(€€€€€€€ô4(€€€ô4(4(€€€ÁÉ¥Ù…Ñ”ÍÑ…Ñ¥Œ¥Ñ¥½¹…ÉäñÍÑÉ¥¹œ°5…¹¥™•ÍÑ¹ÑÉäø%¹‘•á¹ÑÉ¥•Í	åM±Õœ 4(€€€€€€€ÍÑÉ¥¹œÍ•Ñ¥½¸°4(€€€€€€€%I•…‘=¹±å1¥ÍĞñ5…¹¥™•ÍÑ¹ÑÉäø•¹ÑÉ¥•Ì°4(€€€€€€€1¥ÍĞñY…±¥‘…Ñ¥½¹…¥±ÕÉ”ø™…¥±ÕÉ•Ì¤4(€€€ì4(€€€€€€€Ù…È‰åM±Õœ€ô¹•Ü¥Ñ¥½¹…ÉäñÍÑÉ¥¹œ°5…¹¥™•ÍÑ¹ÑÉäø¡MÑÉ¥¹½µÁ…É•È¹=É‘¥¹…°¤ì4(€€€€€€€™½É•… €¡Ù…È•¹ÑÉä¥¸•¹ÑÉ¥•Ì¤4(€€€€€€€ì4(€€€€€€€€€€€Ù…ÈÍ±Õœ€ô•¹ÑÉä¹•ÑMÑÉ¥¹œ ‰Í±Õœˆ¤ì4(€€€€€€€€€€€¥˜€¡ÍÑÉ¥¹œ¹%Í9Õ±±=É]¡¥Ñ•MÁ…”¡Í±Õœ¤¤4(€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”ì4(€€€€€€€€€€€ô4(4(€€€€€€€€€€€¥˜€ …‰åM±Õœ¹QÉå‘¡Í±Õœ°•¹ÑÉä¤¤4(€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì¹‘¡¹•Ü ‰™¥áÑÕÉ•Ì¹µ…¹¥™•ÍĞˆ°€‰‘ÕÁ±¥…Ñ”íÍ•Ñ¥½¹ôÍ±Õœp‰íÍ±Õõpˆˆ°5…¹¥™•ÍÑA…Ñ ¤¤ì4(€€€€€€€€€€€ô4(€€€€€€€ô4(4(€€€€€€€É•ÑÕÉ¸‰åM±Õœì4(€€€ô4(4(€€€ÁÉ¥Ù…Ñ”ÍÑ…Ñ¥ŒÙ½¥Y…±¥‘…Ñ•5…¹¥™•ÍÑ1…‰•±Ì¡5…¹¥™•ÍÑ½Õµ•¹Ğµ…¹¥™•ÍĞ°1¥ÍĞñY…±¥‘…Ñ¥½¹…¥±ÕÉ”ø™…¥±ÕÉ•Ì¤4(€€€ì4(€€€€€€€Ù…È±…‰•±Í	å½µ…¥¸€ô1…‰•±Ì¹±±É½ÕÁÌ4(€€€€€€€€€€€€¹M•±•Ñ5…¹ä¡É½ÕÀ€ôøÉ½ÕÀ¤4(€€€€€€€€€€€€¹É½ÕÁ	ä¡±…‰•°€ôø±…‰•°¹½µ…¥¸°MÑÉ¥¹½µÁ…É•È¹=É‘¥¹…°¤4(€€€€€€€€€€€€¹Q½¥Ñ¥½¹…Éä 4(€€€€€€€€€€€€€€€É½ÕÀ€ôøÉ½ÕÀ¹-•ä°4(€€€€€€€€€€€€€€€É½ÕÀ€ôøÉ½ÕÀ¹M•±•Ğ¡±…‰•°€ôø±…‰•°¹]¥É”¤¹Q½!…Í¡M•Ğ¡MÑÉ¥¹½µÁ…É•È¹=É‘¥¹…°¤°4(€€€€€€€€€€€€€€€MÑÉ¥¹½µÁ…É•È¹=É‘¥¹…°¤ì4(4(€€€€€€€™½É•… €¡Ù…È•¹ÑÉä¥¸µ…¹¥™•ÍĞ¹¥áÑÕÉ•Ì¤4(€€€€€€€ì4(€€€€€€€€€€€Ù…ÈÍ±Õœ€ô•¹ÑÉä¹•ÑMÑÉ¥¹œ ‰Í±Õœˆ¤€üü€‰±¥¹”í•¹ÑÉä¹1¥¹•ôˆì4(€€€€€€€€€€€™½É•… €¡Ù…È±…‰•±I•˜¥¸•¹ÑÉä¹•ÑMÑÉ¥¹ÉÉ…ä ‰±…‰•±Ìˆ¤¤4(€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€Ù…È‘½Ñ%¹‘•à€ô±…‰•±I•˜¹%¹‘•á=˜ œ¸œ°MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…°¤ì4(€€€€€€€€€€€€€€€¥˜€¡‘½Ñ%¹‘•à€ğô€Àñğ‘½Ñ%¹‘•à€ôô±…‰•±I•˜¹1•¹Ñ €´€Ä¤4(€€€€€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì¹‘¡¹•Ü ‰±…‰•±Ì¹…¹½¹¥…°ˆ°€‰™¥áÑÕÉ”p‰íÍ±Õõpˆ±…‰•°p‰í±…‰•±I•™õpˆµÕÍĞÕÍ”‘½µ…¥¸¹İ¥É”™½Éµ…Ğˆ°5…¹¥™•ÍÑA…Ñ ¤¤ì4(€€€€€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”ì4(€€€€€€€€€€€€€€€ô4(4(€€€€€€€€€€€€€€€Ù…È‘½µ…¥¸€ô±…‰•±I•™l¸¹‘½Ñ%¹‘•átì4(€€€€€€€€€€€€€€€Ù…Èİ¥É”€ô±…‰•±I•™l¡‘½Ñ%¹‘•à€¬€Ä¤¸¹tì4(€€€€€€€€€€€€€€€¥˜€ …±…‰•±Í	å½µ…¥¸¹QÉå•ÑY…±Õ”¡‘½µ…¥¸°½ÕĞÙ…ÈÙ…±¥‘1…‰•±Ì¤ñğ€…Ù…±¥‘1…‰•±Ì¹½¹Ñ…¥¹Ì¡İ¥É”¤¤4(€€€€€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì¹‘¡¹•Ü ‰±…‰•±Ì¹…¹½¹¥…°ˆ°€‰™¥áÑÕÉ”p‰íÍ±ÕõpˆÉ•™•É•¹•ÌÕ¹­¹½İ¸±…‰•°p‰í±…‰•±I•™õpˆˆ°5…¹¥™•ÍÑA…Ñ ¤¤ì4(€€€€€€€€€€€€€€€ô4(€€€€€€€€€€€ô4(€€€€€€€ô4(€€€ô4(4(€€€ÁÉ¥Ù…Ñ”Ù½¥Y…±¥‘…Ñ•‘µ¥¹MÕÉ™…•Ì¡1¥ÍĞñY…±¥‘…Ñ¥½¹…¥±ÕÉ”ø™…¥±ÕÉ•Ì¤4(€€€ì4(€€€€€€€™½É•… €¡Ù…ÈÍÕÉ™…”¥¸‘µ¥¹MÕÉ™…•Ì¤4(€€€€€€€ì4(€€€€€€€€€€€¥˜€¡ÍÕÉ™…”¹A…Ñ¡…¹‘¥‘…Ñ•Ì¹¹ä¡Á…Ñ €ôø¥±”¹á¥ÍÑÌ¡Õ±±A…Ñ ¡Á…Ñ ¤¤ñğ¥É•Ñ½Éä¹á¥ÍÑÌ¡Õ±±A…Ñ ¡Á…Ñ ¤¤¤¤4(€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”ì4(€€€€€€€€€€€ô4(4(€€€€€€€€€€€™…¥±ÕÉ•Ì¹‘¡¹•Ü ‰…‘µ¥¸¹¥¹Ñ•É™…”ˆ°€‰µ¥ÍÍ¥¹œíÍÕÉ™…”¹9…µ•ôÍÕÉ™…”ì•áÁ•Ñ•½¹”½˜èíÍÑÉ¥¹œ¹)½¥¸ ˆ°€ˆ°ÍÕÉ™…”¹A…Ñ¡…¹‘¥‘…Ñ•Ì¥ôˆ¤¤ì4(€€€€€€€ô4(€€€ô4(4(€€€ÁÉ¥Ù…Ñ”Ù½¥Y…±¥‘…Ñ•5¥É…Ñ¥½¹Ì¡1¥ÍĞñY…±¥‘…Ñ¥½¹…¥±ÕÉ”ø™…¥±ÕÉ•Ì¤4(€€€ì4(€€€€€€€™½É•… €¡Ù…ÈÁ…Ñ ¥¸I•ÅÕ¥É•‘5¥É…Ñ¥½¹Ì¤4(€€€€€€€ì4(€€€€€€€€€€€¥˜€ …¥±”¹á¥ÍÑÌ¡Õ±±A…Ñ ¡Á…Ñ ¤¤¤4(€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì¹‘¡¹•Ü ‰µ¥É…Ñ¥½¹Ì¹ÁÉ•Í•¹Ğˆ°€‰µ¥ÍÍ¥¹œÉ•ÅÕ¥É•ME1¥Ñ”µ¥É…Ñ¥½¸èíÁ…Ñ¡ôˆ°Á…Ñ ¤¤ì4(€€€€€€€€€€€ô4(€€€€€€€ô4(€€€ô4(4(€€€ÁÉ¥Ù…Ñ”Ù½¥Y…±¥‘…Ñ•AÉ½©•Ñ1…å½ÕĞ¡1¥ÍĞñY…±¥‘…Ñ¥½¹…¥±ÕÉ”ø™…¥±ÕÉ•Ì¤4(€€€ì4(€€€€€€€Ù…È½¹ÑÉ…ÑA…Ñ €ô€‰‘½Ì½ÁÉ½©•Ğµ±…å½ÕĞµØÄ¹µˆì4(€€€€€€€Ù…È½¹ÑÉ…ÑÕ±±A…Ñ €ôÕ±±A…Ñ ¡½¹ÑÉ…ÑA…Ñ ¤ì4(€€€€€€€Ù…È½¹ÑÉ…ÑQ•áĞ€ô¥±”¹á¥ÍÑÌ¡½¹ÑÉ…ÑÕ±±A…Ñ ¤€ü¥±”¹I•…‘±±Q•áĞ¡½¹ÑÉ…ÑÕ±±A…Ñ ¤€èÍÑÉ¥¹œ¹µÁÑäì4(€€€€€€€Ù…È­¹½İ¹AÉ½©•ÑA…Ñ¡Ì€ôAÉ½©•Ñ1…å½ÕĞ¹M•±•Ğ¡ÁÉ½©•Ğ€ôøÁÉ½©•Ğ¹A…Ñ ¤¹Q½!…Í¡M•Ğ¡MÑÉ¥¹½µÁ…É•È¹=É‘¥¹…°¤ì4(4(€€€€€€€™½É•… €¡Ù…ÈÁÉ½©•Ğ¥¸AÉ½©•Ñ1…å½ÕĞ¤4(€€€€€€€ì4(€€€€€€€€€€€¥˜€ …½¹ÑÉ…ÑQ•áĞ¹½¹Ñ…¥¹Ì¡ÁÉ½©•Ğ¹9…µ”°MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…°¤4(€€€€€€€€€€€€€€€ñğ€…½¹ÑÉ…ÑQ•áĞ¹½¹Ñ…¥¹Ì¡ÁÉ½©•Ğ¹A…Ñ °MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…°¤¤4(€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì¹‘¡¹•Ü ‰ÁÉ½©•ÑÌ¹±…å½ÕĞˆ°€‰±…å½ÕĞ½¹ÑÉ…ĞµÕÍĞ‘•±…É”íÁÉ½©•Ğ¹9…µ•ô…ĞíÁÉ½©•Ğ¹A…Ñ¡ôˆ°½¹ÑÉ…ÑA…Ñ ¤¤ì4(€€€€€€€€€€€ô4(4(€€€€€€€€€€€¥˜€¡ÁÉ½©•Ğ¹5ÕÍÑá¥ÍĞ€˜˜€…¥±”¹á¥ÍÑÌ¡Õ±±A…Ñ ¡ÁÉ½©•Ğ¹A…Ñ ¤¤¤4(€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì¹‘¡¹•Ü ‰ÁÉ½©•ÑÌ¹±…å½ÕĞˆ°€‰É•ÅÕ¥É•ÁÉ½©•Ğ¥Ìµ¥ÍÍ¥¹œèíÁÉ½©•Ğ¹A…Ñ¡ôˆ°ÁÉ½©•Ğ¹A…Ñ ¤¤ì4(€€€€€€€€€€€ô4(€€€€€€€ô4(4(€€€€€€€™½É•… €¡Ù…ÈÁÉ½©•Ñ¥±”¥¸¹Õµ•É…Ñ•AÉ½©•Ñ¥±•Ì ¤¤4(€€€€€€€ì4(€€€€€€€€€€€¥˜€ …­¹½İ¹AÉ½©•ÑA…Ñ¡Ì¹½¹Ñ…¥¹Ì¡ÁÉ½©•Ñ¥±”¤¤4(€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€™…¥±ÕÉ•Ì¹‘¡¹•Ü ‰ÁÉ½©•ÑÌ¹±…å½ÕĞˆ°€‰ÁÉ½©•Ğ™¥±”¥Ì½ÕÑÍ¥‘”Ñ¡”ØÄ±…å½ÕĞ½¹ÑÉ…ĞèíÁÉ½©•Ñ¥±•ôˆ°ÁÉ½©•Ñ¥±”¤¤ì4(€€€€€€€€€€€ô4(€€€€€€€ô4(€€€ô4(4(€€€ÁÉ¥Ù…Ñ”%¹Õµ•É…‰±”ñÍÑÉ¥¹œø¹Õµ•É…Ñ•AÉ½©•Ñ¥±•Ì ¤4(€€€ì4(€€€€€€€™½É•… €¡Ù…È‘¥É•Ñ½Éä¥¸¹•İmtì€‰ÍÉŒˆ°€‰Ñ•ÍÑÌˆ°€‰Ñ½½±Ìˆô¤4(€€€€€€€ì4(€€€€€€€€€€€Ù…È™Õ±±¥É•Ñ½Éä€ôÕ±±A…Ñ ¡‘¥É•Ñ½Éä¤ì4(€€€€€€€€€€€¥˜€ …¥É•Ñ½Éä¹á¥ÍÑÌ¡™Õ±±¥É•Ñ½Éä¤¤4(€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”ì4(€€€€€€€€€€€ô4(4(€€€€€€€€€€€™½É•… €¡Ù…È™¥±”¥¸¥É•Ñ½Éä¹¹Õµ•É…Ñ•¥±•Ì¡™Õ±±¥É•Ñ½Éä°€ˆ¨¹ÍÁÉ½¨ˆ°M•…É¡=ÁÑ¥½¸¹±±¥É•Ñ½É¥•Ì¤¹=É‘•È¡MÑÉ¥¹½µÁ…É•È¹=É‘¥¹…°¤¤4(€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€å¥•±É•ÑÕÉ¸A…Ñ ¹•ÑI•±…Ñ¥Ù•A…Ñ ¡É½½Ğ°™¥±”¤4(€€€€€€€€€€€€€€€€€€€€¹I•Á±…”¡A…Ñ ¹¥É•Ñ½ÉåM•Á…É…Ñ½É¡…È°€œ¼œ¤4(€€€€€€€€€€€€€€€€€€€€¹I•Á±…”¡A…Ñ ¹±Ñ¥É•Ñ½ÉåM•Á…É…Ñ½É¡…È°€œ¼œ¤ì4(€€€€€€€€€€€ô4(€€€€€€€ô4(€€€ô4(4(€€€ÁÉ¥Ù…Ñ”%¹Õµ•É…‰±”ñÍÑÉ¥¹œø¹Õµ•É…Ñ•=ÁÑ¥½¹…±M…¹¥±•Ì¡ÍÑÉ¥¹œ‘¥É•Ñ½Éä°ÍÑÉ¥¹œÁ…ÑÑ•É¸¤4(€€€ì4(€€€€€€€Ù…È™Õ±±¥É•Ñ½Éä€ôÕ±±A…Ñ ¡‘¥É•Ñ½Éä¤ì4(€€€€€€€¥˜€ …¥É•Ñ½Éä¹á¥ÍÑÌ¡™Õ±±¥É•Ñ½Éä¤¤4(€€€€€€€ì4(€€€€€€€€€€€å¥•±‰É•…¬ì4(€€€€€€€ô4(4(€€€€€€€™½É•… €¡Ù…È™¥±”¥¸¥É•Ñ½Éä¹¹Õµ•É…Ñ•¥±•Ì¡™Õ±±¥É•Ñ½Éä°Á…ÑÑ•É¸°M•…É¡=ÁÑ¥½¸¹±±¥É•Ñ½É¥•Ì¤¹=É‘•È¡MÑÉ¥¹½µÁ…É•È¹=É‘¥¹…°¤¤4(€€€€€€€ì4(€€€€€€€€€€€å¥•±É•ÑÕÉ¸A…Ñ ¹•ÑI•±…Ñ¥Ù•A…Ñ ¡É½½Ğ°™¥±”¤¹I•Á±…”¡A…Ñ ¹¥É•Ñ½ÉåM•Á…É…Ñ½É¡…È°€œ¼œ¤ì4(€€€€€€€ô4(€€€ô4(4(€€€ÁÉ¥Ù…Ñ”ÍÑÉ¥¹œÕ±±A…Ñ ¡ÍÑÉ¥¹œÁ…Ñ ¤€ôøA…Ñ ¹½µ‰¥¹”¡É½½Ğ°Á…Ñ ¤ì4(4(€€€ÁÉ¥Ù…Ñ”ÍÑ…Ñ¥Œ‰½½°%Í1½İ•É…Í•MÑ…‰±”¡ÍÑÉ¥¹œÙ…±Õ”¤€ôø4(€€€€€€€Ù…±Õ”¹1•¹Ñ €ø€À€˜˜Ù…±Õ”¹±°¡ €ôø€¡ €øô€„œ€˜˜ €ğô€èœ¤ñğ€¡ €øô€œÀœ€˜˜ €ğô€œäœ¤ñğ €ôô€|œ¤ì4)ô4(4)¥¹Ñ•É¹…°ÍÑ…Ñ¥Œ±…ÍÌ5…¹¥™•ÍÑA…ÉÍ•È4)ì4(€€€ÁÕ‰±¥ŒÍÑ…Ñ¥Œ5…¹¥™•ÍÑ½Õµ•¹ĞA…ÉÍ”¡ÍÑÉ¥¹œÁ…Ñ °%I•…‘=¹±å1¥ÍĞñÍÑÉ¥¹œø±¥¹•Ì¤4(€€€ì4(€€€€€€€¥¹ĞüÙ•ÉÍ¥½¸€ô¹Õ±°ì4(€€€€€€€Ù…ÈÑ…Í­Ì€ô¹•Ü1¥ÍĞñ5…¹¥™•ÍÑ¹ÑÉäø ¤ì4(€€€€€€€Ù…È™¥áÑÕÉ•Ì€ô¹•Ü1¥ÍĞñ5…¹¥™•ÍÑ¹ÑÉäø ¤ì4(€€€€€€€Ù…È•ÉÉ½ÉÌ€ô¹•Ü1¥ÍĞñÍÑÉ¥¹œø ¤ì4(€€€€€€€5…¹¥™•ÍÑ¹ÑÉäüÕÉÉ•¹Ñ¹ÑÉä€ô¹Õ±°ì4(€€€€€€€ÍÑÉ¥¹œüÕÉÉ•¹ÑM•Ñ¥½¸€ô¹Õ±°ì4(4(€€€€€€€™½È€¡Ù…È¤€ô€Àì¤€ğ±¥¹•Ì¹½Õ¹Ğì¤¬¬¤4(€€€€€€€ì4(€€€€€€€€€€€Ù…È±¥¹•9Õµ‰•È€ô¤€¬€Äì4(€€€€€€€€€€€Ù…È±¥¹”€ôMÑÉ¥Á½µµ•¹Ğ¡±¥¹•Ím¥t¤¹QÉ¥´ ¤ì4(€€€€€€€€€€€¥˜€¡±¥¹”¹1•¹Ñ €ôô€À¤4(€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”ì4(€€€€€€€€€€€ô4(4(€€€€€€€€€€€¥˜€¡±¥¹”¹MÑ…ÉÑÍ]¥Ñ  ‰mlˆ°MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…°¤€˜˜±¥¹”¹¹‘Í]¥Ñ  ‰utˆ°MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…°¤¤4(€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€ÕÉÉ•¹ÑM•Ñ¥½¸€ô±¥¹•lÈ¸¹xÉt¹QÉ¥´ ¤ì4(€€€€€€€€€€€€€€€ÕÉÉ•¹Ñ¹ÑÉä€ô¹•Ü5…¹¥™•ÍÑ¹ÑÉä¡±¥¹•9Õµ‰•È¤ì4(4(€€€€€€€€€€€€€€€Íİ¥Ñ €¡ÕÉÉ•¹ÑM•Ñ¥½¸¤4(€€€€€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€€€€€…Í”€‰Ñ…Í¬ˆè4(€€€€€€€€€€€€€€€€€€€€€€€Ñ…Í­Ì¹‘¡ÕÉÉ•¹Ñ¹ÑÉä¤ì4(€€€€€€€€€€€€€€€€€€€€€€€‰É•…¬ì4(€€€€€€€€€€€€€€€€€€€…Í”€‰™¥áÑÕÉ”ˆè4(€€€€€€€€€€€€€€€€€€€€€€€™¥áÑÕÉ•Ì¹‘¡ÕÉÉ•¹Ñ¹ÑÉä¤ì4(€€€€€€€€€€€€€€€€€€€€€€€‰É•…¬ì4(€€€€€€€€€€€€€€€€€€€‘•™…Õ±Ğè4(€€€€€€€€€€€€€€€€€€€€€€€•ÉÉ½ÉÌ¹‘ ‰íÁ…Ñ¡ôéí±¥¹•9Õµ‰•ÉôèÕ¹­¹½İ¸Í•Ñ¥½¸mmíÕÉÉ•¹ÑM•Ñ¥½¹õutˆ¤ì4(€€€€€€€€€€€€€€€€€€€€€€€ÕÉÉ•¹Ñ¹ÑÉä€ô¹Õ±°ì4(€€€€€€€€€€€€€€€€€€€€€€€‰É•…¬ì4(€€€€€€€€€€€€€€€ô4(4(€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”ì4(€€€€€€€€€€€ô4(4(€€€€€€€€€€€Ù…È•ÅÕ…±Í%¹‘•à€ô±¥¹”¹%¹‘•á=˜ œôœ°MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…°¤ì4(€€€€€€€€€€€¥˜€¡•ÅÕ…±Í%¹‘•à€ğô€À¤4(€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€•ÉÉ½ÉÌ¹‘ ‰íÁ…Ñ¡ôéí±¥¹•9Õµ‰•Éôè•áÁ•Ñ•­•ä€ôÙ…±Õ”ˆ¤ì4(€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”ì4(€€€€€€€€€€€ô4(4(€€€€€€€€€€€Ù…È­•ä€ô±¥¹•l¸¹•ÅÕ…±Í%¹‘•át¹QÉ¥´ ¤ì4(€€€€€€€€€€€Ù…ÈÉ…İY…±Õ”€ô±¥¹•l¡•ÅÕ…±Í%¹‘•à€¬€Ä¤¸¹t¹QÉ¥´ ¤ì4(€€€€€€€€€€€¥˜€ …%Í-•ä¡­•ä¤¤4(€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€•ÉÉ½ÉÌ¹‘ ‰íÁ…Ñ¡ôéí±¥¹•9Õµ‰•Éôè¥¹Ù…±¥­•äp‰í­•åõpˆˆ¤ì4(€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”ì4(€€€€€€€€€€€ô4(4(€€€€€€€€€€€Ù…ÈÙ…±Õ”€ôA…ÉÍ•Y…±Õ”¡Á…Ñ °±¥¹•9Õµ‰•È°É…İY…±Õ”°•ÉÉ½ÉÌ¤ì4(€€€€€€€€€€€¥˜€¡ÕÉÉ•¹Ñ¹ÑÉä¥Ì¹Õ±°¤4(€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€¥˜€ …ÍÑÉ¥¹œ¹ÅÕ…±Ì¡­•ä°€‰Ù•ÉÍ¥½¸ˆ°MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…°¤¤4(€€€€€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€€€€€•ÉÉ½ÉÌ¹‘ ‰íÁ…Ñ¡ôéí±¥¹•9Õµ‰•ÉôèÑ½Àµ±•Ù•°­•äp‰í­•åõpˆ¥Ì¹½ĞÍÕÁÁ½ÉÑ•ˆ¤ì4(€€€€€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”ì4(€€€€€€€€€€€€€€€ô4(4(€€€€€€€€€€€€€€€¥˜€¡Ù…±Õ”¥Ì¥¹ĞÁ…ÉÍ•‘Y•ÉÍ¥½¸¤4(€€€€€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€€€€€Ù•ÉÍ¥½¸€ôÁ…ÉÍ•‘Y•ÉÍ¥½¸ì4(€€€€€€€€€€€€€€€ô4(€€€€€€€€€€€€€€€•±Í”4(€€€€€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€€€€€•ÉÉ½ÉÌ¹‘ ‰íÁ…Ñ¡ôéí±¥¹•9Õµ‰•ÉôèÙ•ÉÍ¥½¸µÕÍĞ‰”…¸¥¹Ñ••Èˆ¤ì4(€€€€€€€€€€€€€€€ô4(4(€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”ì4(€€€€€€€€€€€ô4(4(€€€€€€€€€€€¥˜€¡ÕÉÉ•¹ÑM•Ñ¥½¸¥Ì¹½Ğ€ ‰Ñ…Í¬ˆ½È€‰™¥áÑÕÉ”ˆ¤¤4(€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€•ÉÉ½ÉÌ¹‘ ‰íÁ…Ñ¡ôéí±¥¹•9Õµ‰•Éôè­•ä½ÕÑÍ¥‘”ÍÕÁÁ½ÉÑ•Í•Ñ¥½¸ˆ¤ì4(€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”ì4(€€€€€€€€€€€ô4(4(€€€€€€€€€€€ÕÉÉ•¹Ñ¹ÑÉä¹M•Ğ¡­•ä°Ù…±Õ”¤ì4(€€€€€€€ô4(4(€€€€€€€É•ÑÕÉ¸¹•Ü5…¹¥™•ÍÑ½Õµ•¹Ğ¡Ù•ÉÍ¥½¸°Ñ…Í­Ì°™¥áÑÕÉ•Ì°•ÉÉ½ÉÌ¤ì4(€€€ô4(4(€€€ÁÉ¥Ù…Ñ”ÍÑ…Ñ¥Œ½‰©•ĞüA…ÉÍ•Y…±Õ”¡ÍÑÉ¥¹œÁ…Ñ °¥¹Ğ±¥¹•9Õµ‰•È°ÍÑÉ¥¹œÉ…İY…±Õ”°1¥ÍĞñÍÑÉ¥¹œø•ÉÉ½ÉÌ¤4(€€€ì4(€€€€€€€¥˜€¡É…İY…±Õ”¹MÑ…ÉÑÍ]¥Ñ  ‰pˆˆ°MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…°¤€˜˜É…İY…±Õ”¹¹‘Í]¥Ñ  ‰pˆˆ°MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…°¤€˜˜É…İY…±Õ”¹1•¹Ñ €øô€È¤4(€€€€€€€ì4(€€€€€€€€€€€É•ÑÕÉ¸É…İY…±Õ•lÄ¸¹xÅtì4(€€€€€€€ô4(4(€€€€€€€¥˜€¡É…İY…±Õ”¥Ì€‰ÑÉÕ”ˆ½È€‰™…±Í”ˆ¤4(€€€€€€€ì4(€€€€€€€€€€€É•ÑÕÉ¸ÍÑÉ¥¹œ¹ÅÕ…±Ì¡É…İY…±Õ”°€‰ÑÉÕ”ˆ°MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…°¤ì4(€€€€€€€ô4(4(€€€€€€€¥˜€¡É…İY…±Õ”¹MÑ…ÉÑÍ]¥Ñ  ‰lˆ°MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…°¤€˜˜É…İY…±Õ”¹¹‘Í]¥Ñ  ‰tˆ°MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…°¤¤4(€€€€€€€ì4(€€€€€€€€€€€É•ÑÕÉ¸A…ÉÍ•MÑÉ¥¹ÉÉ…ä¡Á…Ñ °±¥¹•9Õµ‰•È°É…İY…±Õ”°•ÉÉ½ÉÌ¤ì4(€€€€€€€ô4(4(€€€€€€€¥˜€¡¥¹Ğ¹QÉåA…ÉÍ”¡É…İY…±Õ”°½ÕĞÙ…È¥¹Ñ••È¤¤4(€€€€€€€ì4(€€€€€€€€€€€É•ÑÕÉ¸¥¹Ñ••Èì4(€€€€€€€ô4(4(€€€€€€€•ÉÉ½ÉÌ¹‘ ‰íÁ…Ñ¡ôéí±¥¹•9Õµ‰•ÉôèÕ¹ÍÕÁÁ½ÉÑ•Ù…±Õ”p‰íÉ…İY…±Õ•õpˆˆ¤ì4(€€€€€€€É•ÑÕÉ¸¹Õ±°ì4(€€€ô4(4(€€€ÁÉ¥Ù…Ñ”ÍÑ…Ñ¥Œ%I•…‘=¹±å1¥ÍĞñÍÑÉ¥¹œøA…ÉÍ•MÑÉ¥¹ÉÉ…ä¡ÍÑÉ¥¹œÁ…Ñ °¥¹Ğ±¥¹•9Õµ‰•È°ÍÑÉ¥¹œÉ…İY…±Õ”°1¥ÍĞñÍÑÉ¥¹œø•ÉÉ½ÉÌ¤4(€€€ì4(€€€€€€€Ù…È¥¹¹•È€ôÉ…İY…±Õ•lÄ¸¹xÅt¹QÉ¥´ ¤ì4(€€€€€€€¥˜€¡¥¹¹•È¹1•¹Ñ €ôô€À¤4(€€€€€€€ì4(€€€€€€€€€€€É•ÑÕÉ¸mtì4(€€€€€€€ô4(4(€€€€€€€Ù…ÈÙ…±Õ•Ì€ô¹•Ü1¥ÍĞñÍÑÉ¥¹œø ¤ì4(€€€€€€€™½É•… €¡Ù…ÈÁ…ÉĞ¥¸¥¹¹•È¹MÁ±¥Ğ œ°œ°MÑÉ¥¹MÁ±¥Ñ=ÁÑ¥½¹Ì¹QÉ¥µ¹ÑÉ¥•Ì¤¤4(€€€€€€€ì4(€€€€€€€€€€€¥˜€ …Á…ÉĞ¹MÑ…ÉÑÍ]¥Ñ  ‰pˆˆ°MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…°¤ñğ€…Á…ÉĞ¹¹‘Í]¥Ñ  ‰pˆˆ°MÑÉ¥¹½µÁ…É¥Í½¸¹=É‘¥¹…°¤ñğÁ…ÉĞ¹1•¹Ñ €ğ€È¤4(€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€•ÉÉ½ÉÌ¹‘ ‰íÁ…Ñ¡ôéí±¥¹•9Õµ‰•Éôè…ÉÉ…åÌµÕÍĞ½¹Ñ…¥¸ÅÕ½Ñ•ÍÑÉ¥¹Ìˆ¤ì4(€€€€€€€€€€€€€€€½¹Ñ¥¹Õ”ì4(€€€€€€€€€€€ô4(4(€€€€€€€€€€€Ù…±Õ•Ì¹‘¡Á…ÉÑlÄ¸¹xÅt¤ì4(€€€€€€€ô4(4(€€€€€€€É•ÑÕÉ¸Ù…±Õ•Ìì4(€€€ô4(4(€€€ÁÉ¥Ù…Ñ”ÍÑ…Ñ¥ŒÍÑÉ¥¹œMÑÉ¥Á½µµ•¹Ğ¡ÍÑÉ¥¹œ±¥¹”¤4(€€€ì4(€€€€€€€Ù…È¥¹MÑÉ¥¹œ€ô™…±Í”ì4(€€€€€€€™½È€¡Ù…È¤€ô€Àì¤€ğ±¥¹”¹1•¹Ñ ì¤¬¬¤4(€€€€€€€ì4(€€€€€€€€€€€¥˜€¡±¥¹•m¥t€ôô€œˆœ¤4(€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€¥¹MÑÉ¥¹œ€ô€…¥¹MÑÉ¥¹œì4(€€€€€€€€€€€ô4(€€€€€€€€€€€•±Í”¥˜€¡±¥¹•m¥t€ôô€œŒœ€˜˜€…¥¹MÑÉ¥¹œ¤4(€€€€€€€€€€€ì4(€€€€€€€€€€€€€€€É•ÑÕÉ¸±¥¹•l¸¹¥tì4(€€€€€€€€€€€ô4(€€€€€€€ô4(4(€€€€€€€É•ÑÕÉ¸±¥¹”ì4(€€€ô4(4(€€€ÁÉ¥Ù…Ñ”ÍÑ…Ñ¥Œ‰½½°%Í-•ä¡ÍÑÉ¥¹œ­•ä¤€ôø4(€€€€€€€­•ä¹1•¹Ñ €ø€À€˜˜­•ä¹±°¡ €ôø€¡ €øô€„œ€˜˜ €ğô€èœ¤ñğ€¡ €øô€œ€˜˜ €ğô€hœ¤ñğ€¡ €øô€œÀœ€˜˜ €ğô€œäœ¤ñğ €ôô€|œ¤ì4)ô4(4)¥¹Ñ•É¹…°Í•…±•É•½É5…¹¥™•ÍÑ½Õµ•¹Ğ 4(€€€¥¹ĞüY•ÉÍ¥½¸°4(€€€%I•…‘=¹±å1¥ÍĞñ5…¹¥™•ÍÑ¹ÑÉäøQ…Í­Ì°4(€€€%I•…‘=¹±å1¥ÍĞñ5…¹¥™•ÍÑ¹ÑÉäø¥áÑÕÉ•Ì°4(€€€%I•…‘=¹±å1¥ÍĞñÍÑÉ¥¹œøÉÉ½ÉÌ¤ì4(4)¥¹Ñ•É¹…°Í•…±•±…ÍÌ5…¹¥™•ÍÑ¹ÑÉä¡¥¹Ğ±¥¹”¤4)ì4(€€€ÁÉ¥Ù…Ñ”É•…‘½¹±ä¥Ñ¥½¹…ÉäñÍÑÉ¥¹œ°½‰©•Ğüø™¥•±‘Ì€ô¹•Ü¡MÑÉ¥¹½µÁ…É•È¹=É‘¥¹…°¤ì4(4(€€€ÁÕ‰±¥Œ¥¹Ğ1¥¹”ì•Ğìô€ô±¥¹”ì4(4(€€€ÁÕ‰±¥ŒÙ½¥M•Ğ¡ÍÑÉ¥¹œ­•ä°½‰©•ĞüÙ…±Õ”¤€ôø™¥•±‘Ím­•åt€ôÙ…±Õ”ì4(4(€€€ÁÕ‰±¥ŒÍÑÉ¥¹œü•ÑMÑÉ¥¹œ¡ÍÑÉ¥¹œ­•ä¤€ôø™¥•±‘Ì¹QÉå•ÑY…±Õ”¡­•ä°½ÕĞÙ…ÈÙ…±Õ”¤€üÙ…±Õ”…ÌÍÑÉ¥¹œ€è¹Õ±°ì4(4(€€€ÁÕ‰±¥Œ‰½½°ü•Ñ	½½±•…¸¡ÍÑÉ¥¹œ­•ä¤€ôø™¥•±‘Ì¹QÉå•ÑY…±Õ”¡­•ä°½ÕĞÙ…ÈÙ…±Õ”¤€üÙ…±Õ”…Ì‰½½°ü€è¹Õ±°ì4(4(€€€ÁÕ‰±¥Œ%I•…‘=¹±å1¥ÍĞñÍÑÉ¥¹œø•ÑMÑÉ¥¹ÉÉ…ä¡ÍÑÉ¥¹œ­•ä¤€ôø4(€€€€€€€™¥•±‘Ì¹QÉå•ÑY…±Õ”¡­•ä°½ÕĞÙ…ÈÙ…±Õ”¤€˜˜Ù…±Õ”¥Ì%I•…‘=¹±å1¥ÍĞñÍÑÉ¥¹œøÍÑÉ¥¹Ì€üÍÑÉ¥¹Ì€èmtì4)ô4(4)¥¹Ñ•É¹…°Í•…±•É•½ÉI•ÅÕ¥É•‘¥áÑÕÉ”¡ÍÑÉ¥¹œM±Õœ°ÍÑÉ¥¹œ9…µ”¤ì4(4)¥¹Ñ•É¹…°Í•…±•É•½ÉI•ÅÕ¥É•‘Q…Í¬¡ÍÑÉ¥¹œM±Õœ°ÍÑÉ¥¹œ9…µ”¤ì4(4)¥¹Ñ•É¹…°Í•…±•É•½ÉI•ÅÕ¥É•‘MÕÉ™…”¡ÍÑÉ¥¹œ9…µ”°%I•…‘=¹±å1¥ÍĞñÍÑÉ¥¹œøA…Ñ¡…¹‘¥‘…Ñ•Ì¤ì4(4)¥¹Ñ•É¹…°Í•…±•É•½ÉI•ÅÕ¥É•‘AÉ½©•Ğ¡ÍÑÉ¥¹œ9…µ”°ÍÑÉ¥¹œA…Ñ °‰½½°5ÕÍÑá¥ÍĞ¤ì4(4)¥¹Ñ•É¹…°Í•…±•É•½ÉY…±¥‘…Ñ¥½¹…¥±ÕÉ”¡ÍÑÉ¥¹œ¡•­%°ÍÑÉ¥¹œ5•ÍÍ…”°ÍÑÉ¥¹œüA…Ñ €ô¹Õ±°¤4)ì4(€€€ÁÕ‰±¥ŒÍÑÉ¥¹œQ½¥ÍÁ±…åMÑÉ¥¹œ ¤€ôø€‰í¡•­%‘ôèí5•ÍÍ…•ôˆì4)ô4

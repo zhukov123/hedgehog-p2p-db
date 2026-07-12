@@ -91,6 +91,28 @@ healthy_replica_rows=108
 delete_marker_rows=9
 ```
 
+## Local Restore Drill
+
+The restore drill writes and deletes data in one local runtime, stops it cleanly, copies the metadata and storage directory to a fresh runtime root, restarts with the same tenant keys, verifies restored reads and delete markers, then proves new writes still commit after restore.
+
+```text
+dotnet run --project tools/Hedgehog.Xtask -- run-local-restore-drill
+```
+
+Expected shape:
+
+```text
+local restore drill passed
+objects_written_before_backup=2
+reads_verified_after_restore=2
+delete_verified_after_restore=True
+objects_written_after_restore=1
+metadata_object_rows=3
+metadata_version_rows=4
+healthy_replica_rows=9
+delete_marker_rows=1
+```
+
 ## Curlable Local Runtime API
 
 Start a fresh local runtime API:

@@ -15,6 +15,7 @@ try
 
     await MultiTenantIsolationAndDeleteAsync(Path.Combine(runtimeRoot, "isolation"));
     await StressScenarioAsync(Path.Combine(runtimeRoot, "stress"));
+    await RestoreDrillAsync(Path.Combine(runtimeRoot, "restore-source"), Path.Combine(runtimeRoot, "restore-target"));
 
     Console.WriteLine("Hedgehog.LocalRuntime.Tests passed.");
 }
@@ -71,6 +72,22 @@ static async Task StressScenarioAsync(string runtimeRoot)
     Equal(45, result.MetadataVersionRows);
     Equal(108, result.HealthyReplicaRows);
     Equal(9, result.DeleteMarkerRows);
+}
+
+static async Task RestoreDrillAsync(string sourceRuntimeRoot, string restoredRuntimeRoot)
+{
+    var result = await LocalRuntimeRestoreDrill.RunAsync(
+        LocalClusterOptions.CreateDefault(sourceRuntimeRoot),
+        restoredRuntimeRoot);
+
+    Equal(2, result.ObjectsWrittenBeforeBackup);
+    Equal(2, result.ReadsVerifiedAfterRestore);
+    Equal(true, result.DeleteVerifiedAfterRestore);
+    Equal(1, result.ObjectsWrittenAfterRestore);
+    Equal(3, result.MetadataObjectRows);
+    Equal(4, result.MetadataVersionRows);
+    Equal(9, result.HealthyReplicaRows);
+    Equal(1, result.DeleteMarkerRows);
 }
 
 static async Task<bool> ThrowsInvalidOperationAsync(Func<Task> action)
