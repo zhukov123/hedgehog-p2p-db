@@ -305,6 +305,8 @@ public sealed class LocalCluster : IAsyncDisposable
         {
             await connection.DisposeAsync().ConfigureAwait(false);
         }
+
+        SqliteConnection.ClearAllPools();
     }
 
     private string ConnectionString => new SqliteConnectionStringBuilder
