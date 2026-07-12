@@ -6,7 +6,7 @@ using Hedgehog.Types;
 var parsedCommand = CommandLine.Parse(args);
 if (parsedCommand is null)
 {
-    Console.Error.WriteLine("usage: dotnet run --project tools/Hedgehog.Xtask -- <validate-scaffold-contract|run-local-runtime-smoke|run-local-runtime-stress> [--json] [--allow-missing-scaffold] [--runtime-root <path>] [--tenant-count <n>] [--objects-per-tenant <n>] [--payload-bytes <n>]");
+    Console.Error.WriteLine("usage: dotnet run --project tools/Hedgehog.Xtask -- <validate-scaffold-contract|run-local-runtime-smoke|run-local-runtime-stress|run-local-restore-drill> [--json] [--allow-missing-scaffold] [--runtime-root <path>] [--tenant-count <n>] [--objects-per-tenant <n>] [--payload-bytes <n>]");
     return 2;
 }
 
@@ -99,6 +99,50 @@ if (parsedCommand.Command == "run-local-runtime-stress")
     return 0;
 }
 
+if (parsedCommand.Command == "run-local-restore-drill")
+{
+    var useDefaultRuntimeRoot = parsedCommand.RuntimeRoot is null;
+    var runtimeRoot = parsedCommand.RuntimeRoot
+        ?? Path.Combine(Directory.GetCurrentDirectory(), ".hedgehog", "local-restore-drill");
+    if (Directory.Exists(runtimeRoot))
+    {
+        if (!useDefaultRuntimeRoot)
+        {
+            Console.Error.WriteLine($"custom runtime root already exists and will not be deleted automatically: {runtimeRoot}");
+            return 1;
+        }
+
+        Directory.Delete(runtimeRoot, recursive: true);
+    }
+
+    var result = await LocalRuntimeRestoreDrill.RunAsync(LocalClusterOptions.CreateDefault(runtimeRoot));
+
+    if (parsedCommand.Json)
+    {
+        Console.WriteLine(JsonSerializer.Serialize(result, jsonOptions));
+    }
+    else
+    {
+        Console.WriteLine("local restore drill passed");
+        Console.WriteLine($"runtime_root={result.RuntimeRoot}");
+        Console.WriteLine($"heads_after_restore={result.HeadCountAfterRestore}");
+        Console.WriteLine($"storage_nodes_after_restore={result.StorageNodeCountAfterRestore}");
+        Console.WriteLine($"objects_recovered={result.ObjectsRecovered}");
+        Console.WriteLine($"reads_verified_after_restore={result.ReadsVerifiedAfterRestore}");
+        Console.WriteLine($"delete_marker_recovered={result.DeleteMarkerRecovered}");
+        Console.WriteLine($"metadata_object_rows={result.MetadataObjectRows}");
+        Console.WriteLine($"metadata_version_rows={result.MetadataVersionRows}");
+        Console.WriteLine($"healthy_replica_rows={result.HealthyReplicaRows}");
+        Console.WriteLine($"healthy_replicas_verified={result.HealthyReplicasVerified}");
+        Console.WriteLine($"committed_reservation_rows={result.CommittedReservationRows}");
+        Console.WriteLine($"pending_outbox_rows={result.PendingOutboxRows}");
+        Console.WriteLine($"pending_repair_job_rows={result.PendingRepairJobRows}");
+        Console.WriteLine($"audit_rows={result.AuditRows}");
+    }
+
+    return 0;
+}
+
 var validator = new ScaffoldContractValidator(Directory.GetCurrentDirectory(), parsedCommand.AllowMissingScaffold);
 var failures = validator.Validate();
 
@@ -142,7 +186,7 @@ internal sealed record CommandLine(
 {
     public static CommandLine? Parse(string[] args)
     {
-        if (args.Length == 0 || args[0] is not ("validate-scaffold-contract" or "run-local-runtime-smoke" or "run-local-runtime-stress"))
+        if (args.Length == 0 || args[0] is not ("validate-scaffold-contract" or "run-local-runtime-smoke" or "run-local-runtime-stress" or "run-local-restore-drill"))
         {
             return null;
         }

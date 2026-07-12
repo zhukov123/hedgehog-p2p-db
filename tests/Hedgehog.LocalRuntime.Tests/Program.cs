@@ -15,15 +15,35 @@ try
 
     await MultiTenantIsolationAndDeleteAsync(Path.Combine(runtimeRoot, "isolation"));
     await StressScenarioAsync(Path.Combine(runtimeRoot, "stress"));
+    await RestoreDrillAsync(Path.Combine(runtimeRoot, "restore"));
 
     Console.WriteLine("Hedgehog.LocalRuntime.Tests passed.");
 }
+
 finally
 {
     if (Directory.Exists(runtimeRoot))
     {
         Directory.Delete(runtimeRoot, recursive: true);
     }
+}
+
+static async Task RestoreDrillAsync(string runtimeRoot)
+{
+    var result = await LocalRuntimeRestoreDrill.RunAsync(LocalClusterOptions.CreateDefault(runtimeRoot));
+
+    Equal(2, result.HeadCountAfterRestore);
+    Equal(3, result.StorageNodeCountAfterRestore);
+    Equal(1, result.ReadsVerifiedAfterRestore);
+    Equal(true, result.DeleteMarkerRecovered);
+    Equal(2, result.MetadataObjectRows);
+    Equal(3, result.MetadataVersionRows);
+    Equal(6, result.HealthyReplicaRows);
+    Equal(6, result.HealthyReplicasVerified);
+    Equal(6, result.CommittedReservationRows);
+    Equal(1, result.PendingOutboxRows);
+    Equal(1, result.PendingRepairJobRows);
+    True(result.AuditRows >= 7, "restore drill should preserve workflow audit rows");
 }
 
 static async Task MultiTenantIsolationAndDeleteAsync(string runtimeRoot)
@@ -91,5 +111,13 @@ static void Equal<T>(T expected, T actual)
     if (!EqualityComparer<T>.Default.Equals(expected, actual))
     {
         throw new InvalidOperationException($"Expected '{expected}' but got '{actual}'.");
+    }
+}
+
+static void True(bool condition, string message)
+{
+    if (!condition)
+    {
+        throw new InvalidOperationException(message);
     }
 }

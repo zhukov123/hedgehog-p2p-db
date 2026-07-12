@@ -91,6 +91,31 @@ healthy_replica_rows=108
 delete_marker_rows=9
 ```
 
+## Local Restore Drill
+
+The clean-shutdown restore drill writes encrypted objects, creates pending outbox and repair metadata, shuts the cluster down, restarts against the same runtime root and keys, then verifies a live read, a recovered delete marker, every healthy replica listed in metadata against restarted storage manifests, committed reservations, pending outbox work, pending repair work, and audit rows.
+
+This is a local runtime restart smoke, not yet a snapshot-consistent production backup/restore gate. The next restore hardening step is a SQLite backup/checkpoint path with a SHA-256 manifest and negative tests for missing or corrupted replica blobs.
+
+```text
+dotnet run --project tools/Hedgehog.Xtask -- run-local-restore-drill
+```
+
+Expected shape:
+
+```text
+local restore drill passed
+heads_after_restore=2
+storage_nodes_after_restore=3
+objects_recovered=2
+reads_verified_after_restore=1
+delete_marker_recovered=True
+healthy_replicas_verified=6
+committed_reservation_rows=6
+pending_outbox_rows=1
+pending_repair_job_rows=1
+```
+
 ## Curlable Local Runtime API
 
 Start a fresh local runtime API:
