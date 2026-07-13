@@ -1,4 +1,8 @@
 using Hedgehog.LocalRuntime;
+using Hedgehog.LocalRuntime.Api;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using System.Net.Http.Json;
 
 var runtimeRoot = Path.Combine(Path.GetTempPath(), $"hedgehog-local-runtime-test-{Guid.NewGuid():N}");
 try
@@ -16,6 +20,7 @@ try
     await MultiTenantIsolationAndDeleteAsync(Path.Combine(runtimeRoot, "isolation"));
     await StressScenarioAsync(Path.Combine(runtimeRoot, "stress"));
     await RestoreDrillAsync(Path.Combine(runtimeRoot, "restore"));
+    await RuntimeApiHealthEndpointsAsync(Path.Combine(runtimeRoot, "api-health"));
 
     Console.WriteLine("Hedgehog.LocalRuntime.Tests passed.");
 }
@@ -91,6 +96,57 @@ static async Task StressScenarioAsync(string runtimeRoot)
     Equal(45, result.MetadataVersionRows);
     Equal(108, result.HealthyReplicaRows);
     Equal(9, result.DeleteMarkerRows);
+}
+
+static async Task RuntimeApiHealthEndpointsAsync(string runtimeRoot)
+{
+    var contentRoot = Path.Combine(FindRepoRoot(), "src", "Hedgehog.LocalRuntime.Api");
+    await using var app = new WebApplicationFactory<LocalRuntimeApiAssemblyMarker>()
+        .WithWebHostBuilder(builder =>
+        {
+            builder.UseContentRoot(contentRoot);
+            builder.UseSetting("runtime-root", runtimeRoot);
+            builder.UseSetting("reset-runtime", "true");
+        });
+    using var client = app.CreateClient();
+
+    var live = await client.GetFromJsonAsync<HealthLiveDto>("/health/live")
+        ?? throw new InvalidOperationException("live health endpoint returned no payload");
+    Equal("Hedgehog.LocalRuntime.Api", live.Service);
+    Equal("live", live.Status);
+
+    var ready = await client.GetFromJsonAsync<HealthClusterDto>("/health/ready")
+        ?? throw new InvalidOperationException("ready health endpoint returned no payload");
+    Equal(true, ready.Ready);
+    Equal("ready", ready.Status);
+    Equal(1, ready.TenantCount);
+    Equal(2, ready.RunningHeads);
+    Equal(2, ready.TotalHeads);
+    Equal(3, ready.RunningStorageNodes);
+    Equal(3, ready.TotalStorageNodes);
+    Equal(true, ready.MetadataAvailable);
+
+    var cluster = await client.GetFromJsonAsync<HealthClusterDto>("/health/cluster")
+        ?? throw new InvalidOperationException("cluster health endpoint returned no payload");
+    Equal(ready.TotalHeads, cluster.TotalHeads);
+    Equal(ready.TotalStorageNodes, cluster.TotalStorageNodes);
+    True(cluster.RuntimeRoot.EndsWith("api-health", StringComparison.Ordinal), "cluster health should expose runtime root");
+}
+
+static string FindRepoRoot()
+{
+    var directory = new DirectoryInfo(AppContext.BaseDirectory);
+    while (directory is not null)
+    {
+        if (File.Exists(Path.Combine(directory.FullName, "Hedgehog.sln")))
+        {
+            return directory.FullName;
+        }
+
+        directory = directory.Parent;
+    }
+
+    throw new InvalidOperationException("Could not find repository root containing Hedgehog.sln.");
 }
 
 static async Task<bool> ThrowsInvalidOperationAsync(Func<Task> action)
