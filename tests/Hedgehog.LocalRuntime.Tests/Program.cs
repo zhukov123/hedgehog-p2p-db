@@ -44,6 +44,9 @@ static async Task RestoreDrillAsync(string runtimeRoot)
     Equal(1, result.PendingOutboxRows);
     Equal(1, result.PendingRepairJobRows);
     True(result.AuditRows >= 7, "restore drill should preserve workflow audit rows");
+    Equal(7, result.BackupManifestEntries);
+    Equal(true, result.MissingReplicaBlobRejected);
+    Equal(true, result.CorruptReplicaBlobRejected);
 }
 
 static async Task MultiTenantIsolationAndDeleteAsync(string runtimeRoot)

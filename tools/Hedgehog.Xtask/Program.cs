@@ -138,6 +138,9 @@ if (parsedCommand.Command == "run-local-restore-drill")
         Console.WriteLine($"pending_outbox_rows={result.PendingOutboxRows}");
         Console.WriteLine($"pending_repair_job_rows={result.PendingRepairJobRows}");
         Console.WriteLine($"audit_rows={result.AuditRows}");
+        Console.WriteLine($"backup_manifest_entries={result.BackupManifestEntries}");
+        Console.WriteLine($"missing_replica_blob_rejected={result.MissingReplicaBlobRejected}");
+        Console.WriteLine($"corrupt_replica_blob_rejected={result.CorruptReplicaBlobRejected}");
     }
 
     return 0;

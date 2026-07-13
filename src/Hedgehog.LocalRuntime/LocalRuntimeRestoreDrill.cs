@@ -16,7 +16,10 @@ public sealed record LocalRuntimeRestoreDrillResult(
     long CommittedReservationRows,
     long PendingOutboxRows,
     long PendingRepairJobRows,
-    long AuditRows);
+    long AuditRows,
+    int BackupManifestEntries,
+    bool MissingReplicaBlobRejected,
+    bool CorruptReplicaBlobRejected);
 
 public static class LocalRuntimeRestoreDrill
 {
@@ -47,6 +50,19 @@ public static class LocalRuntimeRestoreDrill
                 "restore-drill-repair-1",
                 cancellationToken).ConfigureAwait(false);
         }
+
+        var backupRoot = Path.Combine(options.RuntimeRoot, "backups", "restore-drill");
+        var backupManifest = await LocalRuntimeBackup.CreateAsync(
+            options.RuntimeRoot,
+            backupRoot,
+            cancellationToken).ConfigureAwait(false);
+        await LocalRuntimeBackup.ValidateAsync(backupRoot, cancellationToken).ConfigureAwait(false);
+        var missingReplicaBlobRejected = await ValidateMissingReplicaBlobIsRejectedAsync(
+            backupRoot,
+            cancellationToken).ConfigureAwait(false);
+        var corruptReplicaBlobRejected = await ValidateCorruptReplicaBlobIsRejectedAsync(
+            backupRoot,
+            cancellationToken).ConfigureAwait(false);
 
         await using var restored = new LocalCluster(options);
         await restored.StartAsync(cancellationToken).ConfigureAwait(false);
@@ -126,7 +142,66 @@ public static class LocalRuntimeRestoreDrill
             committedReservations,
             pendingOutbox,
             pendingRepairJobs,
-            auditRows);
+            auditRows,
+            backupManifest.Entries.Count,
+            missingReplicaBlobRejected,
+            corruptReplicaBlobRejected);
+    }
+
+    private static async Task<bool> ValidateMissingReplicaBlobIsRejectedAsync(
+        string backupRoot,
+        CancellationToken cancellationToken)
+    {
+        var copyRoot = $"{backupRoot}-missing-blob";
+        CopyDirectory(backupRoot, copyRoot);
+        var replica = FirstReplicaBlob(copyRoot);
+        File.Delete(replica);
+        return await ThrowsAnyValidationFailureAsync(
+            () => LocalRuntimeBackup.ValidateAsync(copyRoot, cancellationToken)).ConfigureAwait(false);
+    }
+
+    private static async Task<bool> ValidateCorruptReplicaBlobIsRejectedAsync(
+        string backupRoot,
+        CancellationToken cancellationToken)
+    {
+        var copyRoot = $"{backupRoot}-corrupt-blob";
+        CopyDirectory(backupRoot, copyRoot);
+        var replica = FirstReplicaBlob(copyRoot);
+        await File.WriteAllBytesAsync(replica, [0x48, 0x65, 0x64, 0x67, 0x65], cancellationToken)
+            .ConfigureAwait(false);
+        return await ThrowsAnyValidationFailureAsync(
+            () => LocalRuntimeBackup.ValidateAsync(copyRoot, cancellationToken)).ConfigureAwait(false);
+    }
+
+    private static string FirstReplicaBlob(string backupRoot)
+    {
+        return Directory.EnumerateFiles(Path.Combine(backupRoot, "storage"), "*.bin", SearchOption.AllDirectories)
+            .Order(StringComparer.Ordinal)
+            .FirstOrDefault()
+            ?? throw new InvalidOperationException("Restore backup did not include any replica blobs.");
+    }
+
+    private static void CopyDirectory(string sourceDirectory, string destinationDirectory)
+    {
+        if (Directory.Exists(destinationDirectory))
+        {
+            Directory.Delete(destinationDirectory, recursive: true);
+        }
+
+        foreach (var directory in Directory.EnumerateDirectories(sourceDirectory, "*", SearchOption.AllDirectories))
+        {
+            Directory.CreateDirectory(Path.Combine(
+                destinationDirectory,
+                Path.GetRelativePath(sourceDirectory, directory)));
+        }
+
+        Directory.CreateDirectory(destinationDirectory);
+        foreach (var file in Directory.EnumerateFiles(sourceDirectory, "*", SearchOption.AllDirectories))
+        {
+            var destination = Path.Combine(destinationDirectory, Path.GetRelativePath(sourceDirectory, file));
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            File.Copy(file, destination);
+        }
     }
 
     private static async Task SeedRecoveryRowsAsync(
@@ -315,6 +390,23 @@ public static class LocalRuntimeRestoreDrill
         {
             await action().ConfigureAwait(false);
             return false;
+        }
+        catch (InvalidOperationException)
+        {
+            return true;
+        }
+    }
+
+    private static async Task<bool> ThrowsAnyValidationFailureAsync(Func<Task> action)
+    {
+        try
+        {
+            await action().ConfigureAwait(false);
+            return false;
+        }
+        catch (FileNotFoundException)
+        {
+            return true;
         }
         catch (InvalidOperationException)
         {
