@@ -4,6 +4,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="9.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Hedgehog.LocalRuntime.Api/Hedgehog.LocalRuntime.Api.csproj" />
     <ProjectReference Include="../../src/Hedgehog.LocalRuntime/Hedgehog.LocalRuntime.csproj" />
   </ItemGroup>
 </Project>

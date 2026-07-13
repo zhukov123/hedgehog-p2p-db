@@ -39,6 +39,20 @@ app.Lifetime.ApplicationStopping.Register(() =>
 
 app.MapGet("/", () => Results.Redirect("/runtime/status"));
 
+app.MapGet("/health/live", () => Results.Ok(new HealthLiveDto(
+    "Hedgehog.LocalRuntime.Api",
+    "live",
+    DateTimeOffset.UtcNow)));
+
+app.MapGet("/health/ready", async (LocalCluster runtime, CancellationToken cancellationToken) =>
+{
+    var health = await LoadClusterHealthAsync(runtime, cancellationToken);
+    return health.Ready ? Results.Ok(health) : Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+});
+
+app.MapGet("/health/cluster", async (LocalCluster runtime, CancellationToken cancellationToken) =>
+    Results.Ok(await LoadClusterHealthAsync(runtime, cancellationToken)));
+
 app.MapGet("/runtime/status", async (LocalCluster runtime, CancellationToken cancellationToken) =>
 {
     var snapshot = await runtime.SnapshotAsync(cancellationToken);
@@ -215,11 +229,59 @@ static async Task<IReadOnlyDictionary<string, long>> LoadMetadataCountsAsync(
     return counts;
 }
 
+static async Task<HealthClusterDto> LoadClusterHealthAsync(
+    LocalCluster runtime,
+    CancellationToken cancellationToken)
+{
+    var snapshot = await runtime.SnapshotAsync(cancellationToken);
+    var metadataAvailable = await runtime.ScalarLongAsync(
+        "SELECT COUNT(*) FROM tenants;",
+        cancellationToken) >= 0;
+    var runningHeads = snapshot.Heads.Count(head => head.IsRunning);
+    var runningStorageNodes = snapshot.StorageNodes.Count(node => node.IsRunning);
+    var ready = metadataAvailable
+        && snapshot.Tenants.Count > 0
+        && runningHeads == snapshot.Heads.Count
+        && runningStorageNodes == snapshot.StorageNodes.Count
+        && snapshot.StorageNodes.All(node => node.FreeBytes >= 0);
+
+    return new HealthClusterDto(
+        ready ? "ready" : "not_ready",
+        ready,
+        DateTimeOffset.UtcNow,
+        snapshot.RuntimeRoot,
+        snapshot.MetadataPath,
+        metadataAvailable,
+        snapshot.Tenants.Count,
+        runningHeads,
+        snapshot.Heads.Count,
+        runningStorageNodes,
+        snapshot.StorageNodes.Count);
+}
+
 public sealed record CreateTenantRequest(string TenantId, string DatasetId);
 
 public sealed record PutObjectRequest(string ClientId, string Name, string Text, bool PreferLastHead = false);
 
 public sealed record ErrorDto(string Error);
+
+public sealed record HealthLiveDto(
+    string Service,
+    string Status,
+    DateTimeOffset CheckedAt);
+
+public sealed record HealthClusterDto(
+    string Status,
+    bool Ready,
+    DateTimeOffset CheckedAt,
+    string RuntimeRoot,
+    string MetadataPath,
+    bool MetadataAvailable,
+    int TenantCount,
+    int RunningHeads,
+    int TotalHeads,
+    int RunningStorageNodes,
+    int TotalStorageNodes);
 
 public sealed record TenantCreatedDto(string TenantId, string DatasetId, int RequiredReplicaCount);
 
@@ -265,3 +327,5 @@ public sealed record DeleteObjectResponse(
     string DatasetId,
     string Name,
     bool Deleted);
+
+public partial class Program;

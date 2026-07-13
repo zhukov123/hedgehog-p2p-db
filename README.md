@@ -150,6 +150,16 @@ Prometheus metrics are exposed by the same API:
 curl -fsS http://localhost:5090/metrics
 ```
 
+Runtime health probes are available for supervisors and local operator checks:
+
+```text
+curl -fsS http://localhost:5090/health/live
+curl -fsS http://localhost:5090/health/ready
+curl -fsS http://localhost:5090/health/cluster
+```
+
+`/health/ready` returns HTTP 200 only when metadata is queryable and all in-process heads and storage nodes are running. `/health/cluster` returns the same readiness contract with counts for tenants, heads, storage nodes, metadata availability, and the runtime paths.
+
 ## Grafana Dashboard
 
 Start the local runtime API, then start Prometheus and Grafana:

@@ -36,6 +36,9 @@ Minimum metrics:
 Decision needed:
 - Use OpenTelemetry collector as standard, or expose Prometheus directly and add collector later?
 
+Current local-runtime status:
+- `/health/live`, `/health/ready`, and `/health/cluster` are implemented on `Hedgehog.LocalRuntime.Api` for the in-process runtime. Readiness verifies metadata availability plus running head and storage-node counts; the cluster endpoint returns the same contract without changing HTTP status for dashboards and diagnostics.
+
 ### 2. Grafana Dashboards
 
 Ship dashboards as versioned product artifacts, not afterthoughts.
@@ -243,4 +246,3 @@ The system is not world-ready until a new operator can:
 - Revoke a peer and see replication stop.
 - Take a snapshot and restore onto a fresh node.
 - Follow a runbook without asking the authors.
-
