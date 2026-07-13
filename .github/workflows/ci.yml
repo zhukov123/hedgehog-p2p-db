@@ -26,6 +26,9 @@ jobs:
       - name: Build
         run: dotnet build Hedgehog.sln --no-restore
 
+      - name: Verify Formatting
+        run: dotnet format Hedgehog.sln --no-restore --verify-no-changes --verbosity minimal
+
       - name: Test Metadata Core
         run: dotnet run --project tests/Hedgehog.Metadata.Core.Tests --no-build
 
