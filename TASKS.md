@@ -140,7 +140,7 @@ Admin is not a later dashboard. For v1, admin status, repair visibility, audit r
 - [x] Add local runtime smoke test.
 - [x] Add restore drill test.
 - [x] Add local restore backup manifest validation and negative blob checks.
-- [ ] Add CI gate for build, validator, tests, and formatting.
+- [x] Add CI gate for build, validator, tests, and formatting.
 
 ## Definition Of Done For V1
 
