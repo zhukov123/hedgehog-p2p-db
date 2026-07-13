@@ -131,6 +131,9 @@ Admin is not a later dashboard. For v1, admin status, repair visibility, audit r
 ## Milestone 9: Tests And Release Gate
 
 - [ ] Add unit tests for labels, transitions, and envelope vectors.
+  - [x] Label registry uniqueness, wire format, fixture references, and SQLite seed parity are covered in `Hedgehog.Metadata.Core.Tests`.
+  - [ ] Transition table coverage beyond current metadata decider tests.
+  - [ ] Envelope golden vectors.
 - [x] Add SQLite migration integration tests.
 - [x] Add SQLite integration tests for create write intent, complete replica, commit version, delete marker, lease repair, expire reservation, cleanup conversion, and capacity report.
 - [ ] Add SQLite integration tests for remaining workflows.
