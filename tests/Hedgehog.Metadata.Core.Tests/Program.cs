@@ -1,7 +1,13 @@
 using Hedgehog.Metadata.Core;
+using Hedgehog.Types;
+using System.Text.RegularExpressions;
 
 var now = new DateTimeOffset(2026, 1, 2, 3, 4, 5, TimeSpan.Zero);
 
+LabelRegistryHasUniqueDomainWirePairs();
+LabelsUseStableWireFormat();
+FixtureManifestReferencesKnownLabels();
+SqliteLabelSeedMatchesRegistry();
 CreateWriteIntentCreatesWritingVersion(now);
 CompleteReplicaRejectsHashMismatch(now);
 CommitRequiresReplicaQuorum(now);
@@ -9,6 +15,83 @@ DeleteMarkerBecomesCurrentVersion(now);
 RepairLeaseFencesConcurrentLease(now);
 
 Console.WriteLine("Hedgehog.Metadata.Core.Tests passed.");
+
+static void LabelRegistryHasUniqueDomainWirePairs()
+{
+    var labels = Labels.AllGroups.SelectMany(group => group).ToArray();
+    Equal(11, Labels.AllGroups.Count);
+    Equal(62, labels.Length);
+
+    var duplicates = labels
+        .GroupBy(label => $"{label.Domain}.{label.Wire}", StringComparer.Ordinal)
+        .Where(group => group.Count() > 1)
+        .Select(group => group.Key)
+        .ToArray();
+
+    Equal("", string.Join(", ", duplicates));
+}
+
+static void LabelsUseStableWireFormat()
+{
+    var stableToken = new Regex("^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$", RegexOptions.CultureInvariant);
+
+    foreach (var label in Labels.AllGroups.SelectMany(group => group))
+    {
+        True(stableToken.IsMatch(label.Domain), $"Label domain '{label.Domain}' must be lowercase snake_case.");
+        True(stableToken.IsMatch(label.Wire), $"Label wire value '{label.Domain}.{label.Wire}' must be lowercase snake_case.");
+        True(!string.IsNullOrWhiteSpace(label.Display), $"Label '{label.Domain}.{label.Wire}' must have display text.");
+    }
+}
+
+static void FixtureManifestReferencesKnownLabels()
+{
+    var repoRoot = FindRepoRoot();
+    var manifestPath = Path.Combine(repoRoot, "fixtures", "scaffold", "manifest.toml");
+    var manifest = File.ReadAllText(manifestPath);
+    var knownLabels = Labels.AllGroups.SelectMany(group => group)
+        .Select(label => $"{label.Domain}.{label.Wire}")
+        .ToHashSet(StringComparer.Ordinal);
+
+    var referencedLabels = Regex.Matches(manifest, "\"(?<domain>[a-z_]+)\\.(?<wire>[a-z_]+)\"")
+        .Select(match => match.Value.Trim('"'))
+        .Distinct(StringComparer.Ordinal)
+        .Order(StringComparer.Ordinal)
+        .ToArray();
+
+    True(referencedLabels.Length > 0, "Fixture manifest should reference canonical labels.");
+
+    var unknownLabels = referencedLabels
+        .Where(label => !knownLabels.Contains(label))
+        .ToArray();
+
+    Equal("", string.Join(", ", unknownLabels));
+}
+
+static void SqliteLabelSeedMatchesRegistry()
+{
+    var repoRoot = FindRepoRoot();
+    var migrationPath = Path.Combine(
+        repoRoot,
+        "src",
+        "Hedgehog.Metadata.Sqlite",
+        "Migrations",
+        "0006_capacity_reservations.sql");
+    var migration = File.ReadAllText(migrationPath);
+
+    var expected = Labels.AllGroups.SelectMany(group => group)
+        .Select(label => $"{label.Domain}|{label.Wire}|{label.Display}")
+        .Order(StringComparer.Ordinal)
+        .ToArray();
+    var seeded = Regex.Matches(
+            migration,
+            "\\('(?<domain>[a-z_]+)',\\s*'(?<wire>[a-z_]+)',\\s*'(?<display>[^']+)'\\)")
+        .Select(match => $"{match.Groups["domain"].Value}|{match.Groups["wire"].Value}|{match.Groups["display"].Value}")
+        .Distinct(StringComparer.Ordinal)
+        .Order(StringComparer.Ordinal)
+        .ToArray();
+
+    Equal(string.Join("\n", expected), string.Join("\n", seeded));
+}
 
 static void CreateWriteIntentCreatesWritingVersion(DateTimeOffset now)
 {
@@ -214,10 +297,34 @@ static void Equal<T>(T expected, T actual)
     }
 }
 
+static void True(bool condition, string message)
+{
+    if (!condition)
+    {
+        throw new InvalidOperationException(message);
+    }
+}
+
 static void IsType<T>(object value)
 {
     if (value is not T)
     {
         throw new InvalidOperationException($"Expected event type '{typeof(T).Name}' but got '{value.GetType().Name}'.");
     }
+}
+
+static string FindRepoRoot()
+{
+    var directory = new DirectoryInfo(AppContext.BaseDirectory);
+    while (directory is not null)
+    {
+        if (File.Exists(Path.Combine(directory.FullName, "Hedgehog.sln")))
+        {
+            return directory.FullName;
+        }
+
+        directory = directory.Parent;
+    }
+
+    throw new InvalidOperationException("Could not find repository root.");
 }
