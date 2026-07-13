@@ -35,6 +35,7 @@ This contract keeps the architecture understandable while the implementation is 
 | `Hedgehog.Repair.Tests` | `tests/Hedgehog.Repair.Tests/Hedgehog.Repair.Tests.csproj` | planned | Repair scan, lease, capacity pressure, and completion tests. |
 | `Hedgehog.Client.Tests` | `tests/Hedgehog.Client.Tests/Hedgehog.Client.Tests.csproj` | planned | Lookup hash, encryption metadata, and client command tests. |
 | `Hedgehog.LocalRuntime.Tests` | `tests/Hedgehog.LocalRuntime.Tests/Hedgehog.LocalRuntime.Tests.csproj` | required now | End-to-end local cluster smoke and restore drill tests. |
+| `Hedgehog.LocalRuntime.Api.Tests` | `tests/Hedgehog.LocalRuntime.Api.Tests/Hedgehog.LocalRuntime.Api.Tests.csproj` | required now | Local runtime API health and operator contract tests. |
 
 ## Tool Projects
 

@@ -127,6 +127,7 @@ Admin is not a later dashboard. For v1, admin status, repair visibility, audit r
 - [x] Run multiple heads and three storage agents locally in the smoke runtime.
 - [x] Add smoke scenario: create tenant, create dataset, register nodes, upload object, commit replicas, retrieve from another client, and delete.
 - [x] Expose curlable local runtime API for tenant registration, object writes, reads, deletes, and status.
+- [x] Expose local runtime health endpoints for liveness, readiness, and cluster diagnostics.
 
 ## Milestone 9: Tests And Release Gate
 
@@ -138,6 +139,7 @@ Admin is not a later dashboard. For v1, admin status, repair visibility, audit r
 - [x] Add admin repository contract tests.
 - [x] Add admin endpoint contract tests.
 - [x] Add local runtime smoke test.
+- [x] Add local runtime API health endpoint contract test.
 - [x] Add restore drill test.
 - [ ] Add CI gate for build, validator, tests, and formatting.
 

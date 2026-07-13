@@ -39,6 +39,72 @@ app.Lifetime.ApplicationStopping.Register(() =>
 
 app.MapGet("/", () => Results.Redirect("/runtime/status"));
 
+app.MapGet("/health/live", () => Results.Ok(HealthStatusDto.Live()));
+
+app.MapGet("/health/ready", async (LocalCluster runtime, CancellationToken cancellationToken) =>
+{
+    try
+    {
+        var snapshot = await runtime.SnapshotAsync(cancellationToken);
+        var metadataRows = await runtime.ScalarLongAsync("SELECT COUNT(*) FROM __hedgehog_schema_migrations;", cancellationToken);
+        var ready = ClusterIsReady(snapshot) && metadataRows > 0;
+        var response = HealthStatusDto.Ready(
+            ready,
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["heads"] = RunningCount(snapshot.Heads.Select(head => head.IsRunning), snapshot.Heads.Count),
+                ["storage_nodes"] = RunningCount(snapshot.StorageNodes.Select(node => node.IsRunning), snapshot.StorageNodes.Count),
+                ["tenants"] = snapshot.Tenants.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["schema_migrations"] = metadataRows.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            });
+
+        return ready
+            ? Results.Ok(response)
+            : Results.Json(response, statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+    catch (Exception ex) when (ex is InvalidOperationException or Microsoft.Data.Sqlite.SqliteException)
+    {
+        return Results.Json(
+            HealthStatusDto.Unready(ex.Message),
+            statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+});
+
+app.MapGet("/health/cluster", async (LocalCluster runtime, CancellationToken cancellationToken) =>
+{
+    try
+    {
+        var snapshot = await runtime.SnapshotAsync(cancellationToken);
+        var metadataCounts = await LoadMetadataCountsAsync(runtime, cancellationToken);
+        var ready = ClusterIsReady(snapshot);
+        var response = new ClusterHealthDto(
+            ready ? "ready" : "unready",
+            DateTimeOffset.UtcNow,
+            snapshot.RuntimeRoot,
+            snapshot.MetadataPath,
+            snapshot.Tenants,
+            snapshot.Heads,
+            snapshot.StorageNodes.Select(node => new StorageNodeStatusDto(
+                node.NodeId,
+                node.IsRunning,
+                node.CapacityBytes,
+                node.UsedBytes,
+                node.FreeBytes,
+                node.Replicas.Count)).ToArray(),
+            metadataCounts);
+
+        return ready
+            ? Results.Ok(response)
+            : Results.Json(response, statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+    catch (Exception ex) when (ex is InvalidOperationException or Microsoft.Data.Sqlite.SqliteException)
+    {
+        return Results.Json(
+            HealthStatusDto.Unready(ex.Message),
+            statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+});
+
 app.MapGet("/runtime/status", async (LocalCluster runtime, CancellationToken cancellationToken) =>
 {
     var snapshot = await runtime.SnapshotAsync(cancellationToken);
@@ -197,6 +263,16 @@ app.MapDelete("/runtime/tenants/{tenantId}/datasets/{datasetId}/objects", async 
 
 app.Run();
 
+static bool ClusterIsReady(LocalClusterSnapshot snapshot) =>
+    snapshot.Heads.Count > 0
+    && snapshot.StorageNodes.Count > 0
+    && snapshot.Tenants.Count > 0
+    && snapshot.Heads.All(head => head.IsRunning)
+    && snapshot.StorageNodes.All(node => node.IsRunning);
+
+static string RunningCount(IEnumerable<bool> values, int total) =>
+    $"{values.Count(value => value)}/{total}";
+
 static async Task<IReadOnlyDictionary<string, long>> LoadMetadataCountsAsync(
     LocalCluster runtime,
     CancellationToken cancellationToken)
@@ -221,6 +297,27 @@ public sealed record PutObjectRequest(string ClientId, string Name, string Text,
 
 public sealed record ErrorDto(string Error);
 
+public sealed record HealthStatusDto(
+    string Status,
+    DateTimeOffset CheckedAtUtc,
+    IReadOnlyDictionary<string, string> Details)
+{
+    public static HealthStatusDto Live() =>
+        new("live", DateTimeOffset.UtcNow, new Dictionary<string, string>(StringComparer.Ordinal));
+
+    public static HealthStatusDto Ready(bool ready, IReadOnlyDictionary<string, string> details) =>
+        new(ready ? "ready" : "unready", DateTimeOffset.UtcNow, details);
+
+    public static HealthStatusDto Unready(string reason) =>
+        new(
+            "unready",
+            DateTimeOffset.UtcNow,
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["reason"] = reason,
+            });
+}
+
 public sealed record TenantCreatedDto(string TenantId, string DatasetId, int RequiredReplicaCount);
 
 public sealed record RuntimeStatusDto(
@@ -237,6 +334,16 @@ public sealed record StorageNodeStatusDto(
     long UsedBytes,
     long FreeBytes,
     int ReplicaCount);
+
+public sealed record ClusterHealthDto(
+    string Status,
+    DateTimeOffset CheckedAtUtc,
+    string RuntimeRoot,
+    string MetadataPath,
+    IReadOnlyList<LocalTenantSnapshot> Tenants,
+    IReadOnlyList<HeadNodeSnapshot> Heads,
+    IReadOnlyList<StorageNodeStatusDto> StorageNodes,
+    IReadOnlyDictionary<string, long> MetadataCounts);
 
 public sealed record PutObjectResponse(
     string ClientId,
@@ -265,3 +372,5 @@ public sealed record DeleteObjectResponse(
     string DatasetId,
     string Name,
     bool Deleted);
+
+public partial class Program;
