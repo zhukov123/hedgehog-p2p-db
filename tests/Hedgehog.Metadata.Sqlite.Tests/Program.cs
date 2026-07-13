@@ -26,6 +26,8 @@ await SeedAuthorityAsync(connection);
 await WriteLifecyclePersistsCoherentMetadataAsync(connection);
 await DeleteMarkerPersistsTombstoneAsync(connection);
 await RemainingWorkflowSetPersistsCoherentMetadataAsync(connection);
+await CapacityReportRejectsInvalidAccountingAsync(connection);
+await ExpireReservationRejectsEarlyExpiryAsync(connection);
 await AssertForeignKeyCheckCleanAsync(connection);
 
 Console.WriteLine("Hedgehog.Metadata.Sqlite.Tests passed.");
@@ -332,6 +334,93 @@ static async Task RemainingWorkflowSetPersistsCoherentMetadataAsync(SqliteConnec
     Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM replicas WHERE replica_id = 'replica-c' AND state = 'delete_pending';"));
 }
 
+static async Task CapacityReportRejectsInvalidAccountingAsync(SqliteConnection connection)
+{
+    var workflowStore = SqliteMetadataAuthority.CreateWorkflowStore();
+    var now = new DateTimeOffset(2026, 1, 2, 6, 7, 8, TimeSpan.Zero);
+
+    await ThrowsAsync<ArgumentOutOfRangeException>(() => workflowStore.RecordCapacityReportAsync(
+        connection,
+        new SqliteCapacityReportRequest(
+            "node-a",
+            "unknown",
+            1_000,
+            100,
+            100,
+            800,
+            now,
+            "idem-capacity-invalid-pressure")));
+
+    await ThrowsAsync<ArgumentOutOfRangeException>(() => workflowStore.RecordCapacityReportAsync(
+        connection,
+        new SqliteCapacityReportRequest(
+            "node-a",
+            "normal",
+            1_000,
+            700,
+            400,
+            0,
+            now.AddSeconds(1),
+            "idem-capacity-over-allocated")));
+
+    await ThrowsAsync<InvalidOperationException>(() => workflowStore.RecordCapacityReportAsync(
+        connection,
+        new SqliteCapacityReportRequest(
+            "node-missing",
+            "normal",
+            1_000,
+            100,
+            100,
+            800,
+            now.AddSeconds(2),
+            "idem-capacity-missing-node")));
+}
+
+static async Task ExpireReservationRejectsEarlyExpiryAsync(SqliteConnection connection)
+{
+    var workflowStore = SqliteMetadataAuthority.CreateWorkflowStore();
+    var now = new DateTimeOffset(2026, 1, 2, 7, 8, 9, TimeSpan.Zero);
+
+    await workflowStore.CreateWriteIntentAsync(
+        connection,
+        new SqliteCreateWriteIntentRequest(
+            "tenant-a",
+            "dataset-a",
+            "object-c",
+            [7, 7, 7, 7],
+            "lookup-key-a",
+            "version-c",
+            1,
+            "actor-a",
+            [8, 8, 8, 8],
+            20,
+            "xchacha20-poly1305",
+            "data-key-a",
+            1,
+            1,
+            0,
+            now,
+            TimeSpan.FromMinutes(10),
+            "idem-create-object-c-v1",
+            [
+                new("reservation-d", "replica-d", "node-a", 20, 301),
+            ]));
+
+    await ThrowsAsync<InvalidOperationException>(() => workflowStore.ExpireReservationAsync(
+        connection,
+        new SqliteExpireReservationRequest(
+            "tenant-a",
+            "dataset-a",
+            "object-c",
+            "version-c",
+            "reservation-d",
+            now.AddMinutes(5),
+            "idem-expire-reservation-d-early")));
+
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM capacity_reservations WHERE reservation_id = 'reservation-d' AND state = 'reserved';"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM replicas WHERE replica_id = 'replica-d' AND state = 'planned';"));
+}
+
 static async Task<int> ScalarIntAsync(SqliteConnection connection, string sql)
 {
     await using var command = connection.CreateCommand();
@@ -390,4 +479,19 @@ static void Equal<T>(T expected, T actual)
     {
         throw new InvalidOperationException($"Expected '{expected}' but got '{actual}'.");
     }
+}
+
+static async Task ThrowsAsync<TException>(Func<Task> action)
+    where TException : Exception
+{
+    try
+    {
+        await action();
+    }
+    catch (TException)
+    {
+        return;
+    }
+
+    throw new InvalidOperationException($"Expected exception '{typeof(TException).Name}' but action succeeded.");
 }

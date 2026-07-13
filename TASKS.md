@@ -83,6 +83,8 @@ Admin is not a later dashboard. For v1, admin status, repair visibility, audit r
   - [ ] claim outbox
   - [ ] evaluate recovery gate
 - [ ] Add invariant queries and repair-readiness checks.
+  - [x] Guard capacity reports against unknown pressure labels, impossible byte accounting, and missing nodes.
+  - [x] Guard reservation expiry against premature expiry before the reservation TTL.
 
 ## Milestone 4: Head Service
 

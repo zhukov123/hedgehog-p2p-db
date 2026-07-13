@@ -3,6 +3,7 @@ using System.Data.Common;
 using System.Security.Cryptography;
 using System.Text;
 using Hedgehog.Metadata.Core;
+using Hedgehog.Types;
 
 namespace Hedgehog.Metadata.Sqlite;
 
@@ -874,6 +875,7 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
                   AND dataset_id = @dataset_id
                   AND object_id = @object_id
                   AND version_id = @version_id
+                  AND expires_at_ms <= @expired_at_ms
                   AND state IN ('pending', 'reserved', 'streaming', 'finalizing');
                 """,
                 cancellationToken,
@@ -881,11 +883,12 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
                 ("@tenant_id", request.TenantId),
                 ("@dataset_id", request.DatasetId),
                 ("@object_id", request.ObjectId),
-                ("@version_id", request.VersionId)).ConfigureAwait(false);
+                ("@version_id", request.VersionId),
+                ("@expired_at_ms", ToUnixMs(request.ExpiredAt))).ConfigureAwait(false);
 
             if (rows != 1)
             {
-                throw new InvalidOperationException("Reservation was not found in an expirable state.");
+                throw new InvalidOperationException("Reservation was not found in an expired, expirable state.");
             }
 
             await ExecuteAsync(
@@ -1062,6 +1065,17 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
                 return new SqliteWorkflowResult(MetadataWorkflowNames.CapacityReport, "replayed", Replayed: true, []);
             }
 
+            var nodeExists = await ScalarLongAsync(
+                db,
+                transaction,
+                "SELECT COUNT(*) FROM nodes WHERE node_id = @node_id;",
+                cancellationToken,
+                ("@node_id", request.NodeId)).ConfigureAwait(false);
+            if (nodeExists != 1)
+            {
+                throw new InvalidOperationException("Capacity report node was not found.");
+            }
+
             await ExecuteAsync(
                 db,
                 transaction,
@@ -1097,7 +1111,7 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
                 ("@observed_at_ms", ToUnixMs(request.ObservedAt)),
                 ("@raw_report", request.RawReport)).ConfigureAwait(false);
 
-            await ExecuteAsync(
+            var nodeRows = await ExecuteAsync(
                 db,
                 transaction,
                 """
@@ -1118,6 +1132,11 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
                 ("@reserved_bytes", request.ReservedBytes),
                 ("@free_bytes", request.FreeBytes),
                 ("@observed_at_ms", ToUnixMs(request.ObservedAt))).ConfigureAwait(false);
+
+            if (nodeRows != 1)
+            {
+                throw new InvalidOperationException("Capacity report node was not found.");
+            }
 
             await AppendNodeAuditAsync(
                 db,
@@ -1485,6 +1504,36 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
         RequireNonNegative(request.ReservedBytes, nameof(request.ReservedBytes));
         RequireNonNegative(request.FreeBytes, nameof(request.FreeBytes));
         RequireText(request.IdempotencyKey, nameof(request.IdempotencyKey));
+        RequireKnownLabel(Labels.CapacityPressureStates, request.CapacityPressure, nameof(request.CapacityPressure));
+        RequireCapacityAccounting(request);
+    }
+
+    private static void RequireKnownLabel(IReadOnlyList<LabelSpec> labels, string value, string name)
+    {
+        if (!labels.Any(label => string.Equals(label.Wire, value, StringComparison.Ordinal)))
+        {
+            throw new ArgumentOutOfRangeException(name, value, $"{name} must be a known label value.");
+        }
+    }
+
+    private static void RequireCapacityAccounting(SqliteCapacityReportRequest request)
+    {
+        var allocatedBytes = checked(request.UsedBytes + request.ReservedBytes);
+        if (allocatedBytes > request.CapacityBytes)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(request.UsedBytes),
+                allocatedBytes,
+                "used plus reserved bytes must not exceed capacity bytes.");
+        }
+
+        if (request.FreeBytes > request.CapacityBytes - allocatedBytes)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(request.FreeBytes),
+                request.FreeBytes,
+                "free bytes must fit within capacity after used and reserved bytes.");
+        }
     }
 
     private static void RequireText(string value, string name)
