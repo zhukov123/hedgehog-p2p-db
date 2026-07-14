@@ -1160,6 +1160,118 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
         }
     }
 
+    public async Task<SqliteClaimOutboxResult> ClaimOutboxAsync(
+        IDbConnection connection,
+        SqliteClaimOutboxRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateClaimOutbox(request);
+        var db = RequireDbConnection(connection);
+        await EnsureOpenAsync(db, cancellationToken).ConfigureAwait(false);
+        await using var transaction = await db.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            var claimedAtMs = ToUnixMs(request.ClaimedAt);
+            var claimedUntil = request.ClaimedAt.Add(request.ClaimDuration);
+            var claimedUntilMs = ToUnixMs(claimedUntil);
+            var events = await ClaimOutboxRowsAsync(
+                db,
+                transaction,
+                request,
+                claimedAtMs,
+                claimedUntil,
+                claimedUntilMs,
+                cancellationToken).ConfigureAwait(false);
+
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return new SqliteClaimOutboxResult(
+                new SqliteWorkflowResult(
+                    MetadataWorkflowNames.ClaimOutbox,
+                    events.Count == 0 ? "empty" : "claimed",
+                    Replayed: false,
+                    events.Select(static item => item.Topic).Distinct(StringComparer.Ordinal).ToArray()),
+                events);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    private static async Task<IReadOnlyList<SqliteClaimedOutboxEvent>> ClaimOutboxRowsAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        SqliteClaimOutboxRequest request,
+        long claimedAtMs,
+        DateTimeOffset claimedUntil,
+        long claimedUntilMs,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText =
+            """
+            UPDATE outbox_events
+            SET claimed_by = @claimed_by,
+                claimed_until_ms = @claimed_until_ms,
+                attempt_count = attempt_count + 1
+            WHERE outbox_id IN (
+                SELECT outbox_id
+                FROM outbox_events
+                WHERE delivered_at_ms IS NULL
+                  AND available_at_ms <= @claimed_at_ms
+                  AND (claimed_until_ms IS NULL OR claimed_until_ms <= @claimed_at_ms)
+                  AND (
+                      @destination_node_id IS NULL
+                      OR destination_node_id IS NULL
+                      OR destination_node_id = @destination_node_id
+                  )
+                  AND (@topic IS NULL OR topic = @topic)
+                ORDER BY available_at_ms, created_at_ms, outbox_id
+                LIMIT @max_items
+            )
+            RETURNING
+                outbox_id,
+                workflow,
+                destination_node_id,
+                topic,
+                payload,
+                idempotency_key,
+                attempt_count,
+                available_at_ms,
+                created_at_ms;
+            """;
+        AddParameters(
+            command,
+            ("@claimed_by", request.ClaimedBy),
+            ("@claimed_until_ms", claimedUntilMs),
+            ("@claimed_at_ms", claimedAtMs),
+            ("@destination_node_id", request.DestinationNodeId),
+            ("@topic", request.Topic),
+            ("@max_items", request.MaxItems));
+
+        var events = new List<SqliteClaimedOutboxEvent>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            events.Add(new SqliteClaimedOutboxEvent(
+                reader.GetString(0),
+                reader.GetString(1),
+                reader.IsDBNull(2) ? null : reader.GetString(2),
+                reader.GetString(3),
+                (byte[])reader.GetValue(4),
+                reader.GetString(5),
+                reader.GetInt32(6),
+                DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(7)),
+                claimedUntil,
+                DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(8))));
+        }
+
+        return events;
+    }
+
     private static async Task<bool> TryBeginIdempotencyAsync(
         DbConnection connection,
         DbTransaction transaction,
@@ -1506,6 +1618,22 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
         RequireText(request.IdempotencyKey, nameof(request.IdempotencyKey));
         RequireKnownLabel(Labels.CapacityPressureStates, request.CapacityPressure, nameof(request.CapacityPressure));
         RequireCapacityAccounting(request);
+    }
+
+    private static void ValidateClaimOutbox(SqliteClaimOutboxRequest request)
+    {
+        RequireText(request.ClaimedBy, nameof(request.ClaimedBy));
+        RequirePositive(request.ClaimDuration, nameof(request.ClaimDuration));
+        RequirePositive(request.MaxItems, nameof(request.MaxItems));
+        if (request.DestinationNodeId is not null)
+        {
+            RequireText(request.DestinationNodeId, nameof(request.DestinationNodeId));
+        }
+
+        if (request.Topic is not null)
+        {
+            RequireText(request.Topic, nameof(request.Topic));
+        }
     }
 
     private static void RequireKnownLabel(IReadOnlyList<LabelSpec> labels, string value, string name)

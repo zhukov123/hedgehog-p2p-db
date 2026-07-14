@@ -26,6 +26,7 @@ await SeedAuthorityAsync(connection);
 await WriteLifecyclePersistsCoherentMetadataAsync(connection);
 await DeleteMarkerPersistsTombstoneAsync(connection);
 await RemainingWorkflowSetPersistsCoherentMetadataAsync(connection);
+await ClaimOutboxClaimsEligibleEventsAsync(connection);
 await CapacityReportRejectsInvalidAccountingAsync(connection);
 await ExpireReservationRejectsEarlyExpiryAsync(connection);
 await AssertForeignKeyCheckCleanAsync(connection);
@@ -374,6 +375,89 @@ static async Task CapacityReportRejectsInvalidAccountingAsync(SqliteConnection c
             800,
             now.AddSeconds(2),
             "idem-capacity-missing-node")));
+}
+
+static async Task ClaimOutboxClaimsEligibleEventsAsync(SqliteConnection connection)
+{
+    var workflowStore = SqliteMetadataAuthority.CreateWorkflowStore();
+    var now = new DateTimeOffset(2026, 1, 2, 6, 30, 0, TimeSpan.Zero);
+    var nowMs = now.ToUnixTimeMilliseconds();
+
+    await ExecuteAsync(
+        connection,
+        """
+        INSERT INTO outbox_events (
+            outbox_id,
+            workflow,
+            destination_node_id,
+            topic,
+            payload,
+            idempotency_key,
+            available_at_ms,
+            claimed_by,
+            claimed_until_ms,
+            delivered_at_ms,
+            created_at_ms
+        )
+        VALUES
+            ('outbox-broadcast', 'claim_outbox', NULL, 'repair.leased', X'0102', 'idem-outbox-broadcast', @past_ms, NULL, NULL, NULL, @past_ms),
+            ('outbox-node-a', 'claim_outbox', 'node-a', 'repair.leased', X'0304', 'idem-outbox-node-a', @past_ms, NULL, NULL, NULL, @past_ms),
+            ('outbox-node-b', 'claim_outbox', 'node-b', 'repair.leased', X'0506', 'idem-outbox-node-b', @past_ms, NULL, NULL, NULL, @past_ms),
+            ('outbox-future', 'claim_outbox', 'node-a', 'repair.leased', X'0708', 'idem-outbox-future', @future_ms, NULL, NULL, NULL, @future_ms),
+            ('outbox-unexpired', 'claim_outbox', 'node-a', 'repair.retry', X'090A', 'idem-outbox-unexpired', @past_ms, 'other-worker', @unexpired_ms, NULL, @past_ms),
+            ('outbox-delivered', 'claim_outbox', 'node-a', 'repair.leased', X'0B0C', 'idem-outbox-delivered', @past_ms, NULL, NULL, @past_ms, @past_ms);
+        """,
+        ("@past_ms", nowMs - 10_000),
+        ("@future_ms", nowMs + 60_000),
+        ("@unexpired_ms", nowMs + 120_000));
+
+    var firstClaim = await workflowStore.ClaimOutboxAsync(
+        connection,
+        new SqliteClaimOutboxRequest(
+            "node-a",
+            now,
+            TimeSpan.FromMinutes(2),
+            MaxItems: 10,
+            DestinationNodeId: "node-a",
+            Topic: "repair.leased"));
+
+    Equal("claimed", firstClaim.WorkflowResult.State);
+    Equal(2, firstClaim.Events.Count);
+    Equal("outbox-broadcast", firstClaim.Events[0].OutboxId);
+    Equal("outbox-node-a", firstClaim.Events[1].OutboxId);
+    Equal(1, firstClaim.Events[0].AttemptCount);
+    Equal("repair.leased", firstClaim.WorkflowResult.OutboxTopics.Single());
+    Equal(2, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM outbox_events WHERE claimed_by = 'node-a' AND claimed_until_ms IS NOT NULL;"));
+    Equal(0, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM outbox_events WHERE outbox_id IN ('outbox-node-b', 'outbox-future', 'outbox-delivered') AND claimed_by = 'node-a';"));
+
+    var immediateReplayClaim = await workflowStore.ClaimOutboxAsync(
+        connection,
+        new SqliteClaimOutboxRequest(
+            "node-a",
+            now.AddSeconds(1),
+            TimeSpan.FromMinutes(2),
+            MaxItems: 10,
+            DestinationNodeId: "node-a",
+            Topic: "repair.leased"));
+
+    Equal("empty", immediateReplayClaim.WorkflowResult.State);
+    Equal(0, immediateReplayClaim.Events.Count);
+
+    var expiredClaim = await workflowStore.ClaimOutboxAsync(
+        connection,
+        new SqliteClaimOutboxRequest(
+            "node-a",
+            now.AddMinutes(3),
+            TimeSpan.FromMinutes(2),
+            MaxItems: 10,
+            DestinationNodeId: "node-a",
+            Topic: "repair.retry"));
+
+    Equal("claimed", expiredClaim.WorkflowResult.State);
+    Equal(1, expiredClaim.Events.Count);
+    Equal("outbox-unexpired", expiredClaim.Events[0].OutboxId);
+    Equal(1, expiredClaim.Events[0].AttemptCount);
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM outbox_events WHERE outbox_id = 'outbox-unexpired' AND claimed_by = 'node-a';"));
 }
 
 static async Task ExpireReservationRejectsEarlyExpiryAsync(SqliteConnection connection)
