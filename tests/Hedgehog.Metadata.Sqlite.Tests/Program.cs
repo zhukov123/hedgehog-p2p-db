@@ -26,6 +26,7 @@ await SeedAuthorityAsync(connection);
 await WriteLifecyclePersistsCoherentMetadataAsync(connection);
 await DeleteMarkerPersistsTombstoneAsync(connection);
 await RemainingWorkflowSetPersistsCoherentMetadataAsync(connection);
+await EvaluateRecoveryGatePersistsAuthorityModeAsync(connection);
 await ClaimOutboxClaimsEligibleEventsAsync(connection);
 await CapacityReportRejectsInvalidAccountingAsync(connection);
 await ExpireReservationRejectsEarlyExpiryAsync(connection);
@@ -375,6 +376,100 @@ static async Task CapacityReportRejectsInvalidAccountingAsync(SqliteConnection c
             800,
             now.AddSeconds(2),
             "idem-capacity-missing-node")));
+}
+
+static async Task EvaluateRecoveryGatePersistsAuthorityModeAsync(SqliteConnection connection)
+{
+    var workflowStore = SqliteMetadataAuthority.CreateWorkflowStore();
+    var now = new DateTimeOffset(2026, 1, 2, 6, 20, 0, TimeSpan.Zero);
+    var nowMs = now.ToUnixTimeMilliseconds();
+
+    await ExecuteAsync(
+        connection,
+        """
+        INSERT INTO outbox_events (
+            outbox_id,
+            workflow,
+            destination_node_id,
+            topic,
+            payload,
+            idempotency_key,
+            available_at_ms,
+            created_at_ms
+        )
+        VALUES (
+            'outbox-recovery-lag',
+            'evaluate_recovery_gate',
+            NULL,
+            'recovery.pending',
+            X'CAFE',
+            'idem-outbox-recovery-lag',
+            @available_at_ms,
+            @available_at_ms
+        );
+        """,
+        ("@available_at_ms", nowMs - 120_000));
+
+    var blocked = await workflowStore.EvaluateRecoveryGateAsync(
+        connection,
+        new SqliteEvaluateRecoveryGateRequest(
+            "default",
+            MigrationsCurrent: true,
+            InvariantChecksPassed: true,
+            AuthorityCachesRebuilt: true,
+            AuditAppendAvailable: true,
+            MaxOutboxLag: TimeSpan.FromSeconds(30),
+            MaxPendingOutboxEvents: 0,
+            RepairBacklogSafe: true,
+            now,
+            "idem-evaluate-recovery-blocked"));
+
+    Equal("recovering", blocked.State);
+    Equal("recovery.gate_evaluated", blocked.OutboxTopics.Single());
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM metadata_store WHERE store_id = 'default' AND degraded_mode = 'recovering';"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM audit_events WHERE workflow = 'evaluate_recovery_gate' AND idempotency_key = 'idem-evaluate-recovery-blocked';"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM outbox_events WHERE workflow = 'evaluate_recovery_gate' AND topic = 'recovery.gate_evaluated';"));
+
+    var replay = await workflowStore.EvaluateRecoveryGateAsync(
+        connection,
+        new SqliteEvaluateRecoveryGateRequest(
+            "default",
+            MigrationsCurrent: true,
+            InvariantChecksPassed: true,
+            AuthorityCachesRebuilt: true,
+            AuditAppendAvailable: true,
+            MaxOutboxLag: TimeSpan.FromSeconds(30),
+            MaxPendingOutboxEvents: 0,
+            RepairBacklogSafe: true,
+            now,
+            "idem-evaluate-recovery-blocked"));
+
+    Equal(true, replay.Replayed);
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM audit_events WHERE workflow = 'evaluate_recovery_gate' AND idempotency_key = 'idem-evaluate-recovery-blocked';"));
+
+    await ExecuteAsync(
+        connection,
+        "UPDATE outbox_events SET delivered_at_ms = @delivered_at_ms WHERE delivered_at_ms IS NULL;",
+        ("@delivered_at_ms", nowMs));
+
+    var recovered = await workflowStore.EvaluateRecoveryGateAsync(
+        connection,
+        new SqliteEvaluateRecoveryGateRequest(
+            "default",
+            MigrationsCurrent: true,
+            InvariantChecksPassed: true,
+            AuthorityCachesRebuilt: true,
+            AuditAppendAvailable: true,
+            MaxOutboxLag: TimeSpan.FromSeconds(30),
+            MaxPendingOutboxEvents: 0,
+            RepairBacklogSafe: true,
+            now.AddSeconds(1),
+            "idem-evaluate-recovery-normal"));
+
+    Equal("normal", recovered.State);
+    Equal("recovery.gate_evaluated", recovered.OutboxTopics.Single());
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM metadata_store WHERE store_id = 'default' AND degraded_mode = 'normal';"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM metadata_store WHERE store_id = 'default' AND metadata LIKE '%pending_outbox_events=0%';"));
 }
 
 static async Task ClaimOutboxClaimsEligibleEventsAsync(SqliteConnection connection)
