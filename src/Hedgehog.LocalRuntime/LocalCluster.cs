@@ -39,6 +39,13 @@ public sealed record LocalClusterSnapshot(
     IReadOnlyList<HeadNodeSnapshot> Heads,
     IReadOnlyList<StorageAgentSnapshot> StorageNodes);
 
+public sealed record LocalOutboxSnapshot(
+    long PendingRows,
+    long LeasedRows,
+    long FailedRows,
+    long DeliveredRows,
+    long OldestPendingAgeSeconds);
+
 public sealed record LocalTenantSnapshot(
     string TenantId,
     string DatasetId,
@@ -62,6 +69,7 @@ public sealed class LocalCluster : IAsyncDisposable
     private readonly List<FileStorageAgent> storageNodes = [];
     private readonly Dictionary<string, LocalTenantRuntime> tenants = new(StringComparer.Ordinal);
     private readonly List<SqliteConnection> headConnections = [];
+    private readonly RecordingOutboxPublisher outboxPublisher = new();
     private bool started;
 
     public LocalCluster(LocalClusterOptions options)
@@ -95,6 +103,8 @@ public sealed class LocalCluster : IAsyncDisposable
     public IReadOnlyList<IHeadNode> Heads => tenants.Values.SelectMany(tenant => tenant.Heads).Cast<IHeadNode>().ToArray();
 
     public IReadOnlyList<IStorageAgentNode> StorageNodes => storageNodes;
+
+    public IReadOnlyList<OutboxDispatchMessage> PublishedOutboxMessages => outboxPublisher.Messages;
 
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
@@ -271,6 +281,93 @@ public sealed class LocalCluster : IAsyncDisposable
         return new LocalClusterSnapshot(RuntimeRoot, MetadataPath, tenantSnapshots, headSnapshots, storageSnapshots);
     }
 
+    public async Task<OutboxDispatchResult> DispatchOutboxAsync(
+        int maxItems = 25,
+        TimeSpan? leaseDuration = null,
+        string? topic = null,
+        CancellationToken cancellationToken = default)
+    {
+        RequireStarted();
+        var claimed = 0;
+        var delivered = 0;
+        var failed = 0;
+        foreach (var head in tenants.Values.SelectMany(tenant => tenant.Heads))
+        {
+            var result = await head.DispatchOutboxAsync(
+                outboxPublisher,
+                maxItems,
+                leaseDuration ?? TimeSpan.FromSeconds(30),
+                topic,
+                cancellationToken).ConfigureAwait(false);
+            claimed += result.Claimed;
+            delivered += result.Delivered;
+            failed += result.Failed;
+            if (result.Claimed == 0)
+            {
+                continue;
+            }
+
+            break;
+        }
+
+        return new OutboxDispatchResult(claimed, delivered, failed);
+    }
+
+    public async Task<LocalOutboxSnapshot> OutboxSnapshotAsync(CancellationToken cancellationToken = default)
+    {
+        RequireStarted();
+        var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var pending = await ScalarLongAsync(
+            """
+            SELECT COUNT(*)
+            FROM outbox_events
+            WHERE delivered_at_ms IS NULL
+              AND available_at_ms <= @now_ms
+              AND (claimed_until_ms IS NULL OR claimed_until_ms <= @now_ms)
+              AND attempt_count = 0;
+            """,
+            cancellationToken,
+            ("@now_ms", nowMs)).ConfigureAwait(false);
+        var leased = await ScalarLongAsync(
+            """
+            SELECT COUNT(*)
+            FROM outbox_events
+            WHERE delivered_at_ms IS NULL
+              AND claimed_until_ms > @now_ms;
+            """,
+            cancellationToken,
+            ("@now_ms", nowMs)).ConfigureAwait(false);
+        var failed = await ScalarLongAsync(
+            """
+            SELECT COUNT(*)
+            FROM outbox_events
+            WHERE delivered_at_ms IS NULL
+              AND available_at_ms <= @now_ms
+              AND (claimed_until_ms IS NULL OR claimed_until_ms <= @now_ms)
+              AND attempt_count > 0;
+            """,
+            cancellationToken,
+            ("@now_ms", nowMs)).ConfigureAwait(false);
+        var delivered = await ScalarLongAsync(
+            "SELECT COUNT(*) FROM outbox_events WHERE delivered_at_ms IS NOT NULL;",
+            cancellationToken).ConfigureAwait(false);
+        var oldestAvailable = await ScalarNullableLongAsync(
+            """
+            SELECT MIN(available_at_ms)
+            FROM outbox_events
+            WHERE delivered_at_ms IS NULL
+              AND available_at_ms <= @now_ms
+              AND (claimed_until_ms IS NULL OR claimed_until_ms <= @now_ms);
+            """,
+            cancellationToken,
+            ("@now_ms", nowMs)).ConfigureAwait(false);
+        var oldestAgeSeconds = oldestAvailable is null
+            ? 0
+            : Math.Max(0, (nowMs - oldestAvailable.Value) / 1000);
+
+        return new LocalOutboxSnapshot(pending, leased, failed, delivered, oldestAgeSeconds);
+    }
+
     public async Task<long> ScalarLongAsync(
         string sql,
         CancellationToken cancellationToken = default,
@@ -287,6 +384,24 @@ public sealed class LocalCluster : IAsyncDisposable
 
         var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
         return Convert.ToInt64(result);
+    }
+
+    private async Task<long?> ScalarNullableLongAsync(
+        string sql,
+        CancellationToken cancellationToken = default,
+        params (string Name, object? Value)[] parameters)
+    {
+        RequireStarted();
+        await using var connection = await OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        foreach (var (name, value) in parameters)
+        {
+            command.Parameters.AddWithValue(name, value ?? DBNull.Value);
+        }
+
+        var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        return result is null or DBNull ? null : Convert.ToInt64(result);
     }
 
     public async ValueTask DisposeAsync()
@@ -362,5 +477,18 @@ public sealed class LocalCluster : IAsyncDisposable
         }
 
         return $"{tenantId}/{datasetId}";
+    }
+
+    private sealed class RecordingOutboxPublisher : IOutboxPublisher
+    {
+        private readonly List<OutboxDispatchMessage> messages = [];
+
+        public IReadOnlyList<OutboxDispatchMessage> Messages => messages.ToArray();
+
+        public Task PublishAsync(OutboxDispatchMessage message, CancellationToken cancellationToken = default)
+        {
+            messages.Add(message);
+            return Task.CompletedTask;
+        }
     }
 }

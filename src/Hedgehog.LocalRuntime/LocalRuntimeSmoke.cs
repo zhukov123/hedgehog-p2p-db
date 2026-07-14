@@ -1,4 +1,6 @@
 using System.Text;
+using Hedgehog.Metadata.Sqlite;
+using Microsoft.Data.Sqlite;
 
 namespace Hedgehog.LocalRuntime;
 
@@ -9,8 +11,10 @@ public sealed record LocalRuntimeSmokeResult(
     int PublishedObjects,
     int VerifiedRetrievals,
     bool DeleteVerified,
+    int DispatchedOutboxEvents,
     long MetadataObjectRows,
-    long HealthyReplicaRows);
+    long HealthyReplicaRows,
+    long DeliveredOutboxRows);
 
 public static class LocalRuntimeSmoke
 {
@@ -48,6 +52,25 @@ public static class LocalRuntimeSmoke
         if (retrievedByB != "hello from client a")
         {
             throw new InvalidOperationException("Client B could not retrieve Client A data.");
+        }
+
+        await CreateRepairLeaseOutboxAsync(cluster, options, publishedA, cancellationToken).ConfigureAwait(false);
+        var pendingOutbox = await cluster.OutboxSnapshotAsync(cancellationToken).ConfigureAwait(false);
+        if (pendingOutbox.PendingRows < 1)
+        {
+            throw new InvalidOperationException("Repair lease workflow did not create pending outbox work.");
+        }
+
+        var dispatch = await cluster.DispatchOutboxAsync(topic: "repair.leased", cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+        if (dispatch is not { Claimed: 1, Delivered: 1, Failed: 0 })
+        {
+            throw new InvalidOperationException("Repair lease outbox work was not dispatched exactly once.");
+        }
+
+        if (cluster.PublishedOutboxMessages.Count(message => message.IdempotencyKey == "idem-smoke-repair:outbox") != 1)
+        {
+            throw new InvalidOperationException("Repair lease outbox event was not published exactly once by idempotency key.");
         }
 
         var payloadB = Encoding.UTF8.GetBytes("hello from client b with binary-safe bytes");
@@ -91,6 +114,9 @@ public static class LocalRuntimeSmoke
         var healthyReplicaRows = await cluster.ScalarLongAsync(
             "SELECT COUNT(*) FROM replicas WHERE state = 'healthy';",
             cancellationToken).ConfigureAwait(false);
+        var deliveredOutboxRows = await cluster.ScalarLongAsync(
+            "SELECT COUNT(*) FROM outbox_events WHERE delivered_at_ms IS NOT NULL;",
+            cancellationToken).ConfigureAwait(false);
         var plaintextNameRows = await cluster.ScalarLongAsync(
             """
             SELECT COUNT(*)
@@ -112,7 +138,65 @@ public static class LocalRuntimeSmoke
             PublishedObjects: 2,
             VerifiedRetrievals: 2,
             DeleteVerified: deleteVerified,
+            DispatchedOutboxEvents: dispatch.Delivered,
             MetadataObjectRows: objectRows,
-            HealthyReplicaRows: healthyReplicaRows);
+            HealthyReplicaRows: healthyReplicaRows,
+            DeliveredOutboxRows: deliveredOutboxRows);
+    }
+
+    private static async Task CreateRepairLeaseOutboxAsync(
+        LocalCluster cluster,
+        LocalClusterOptions options,
+        Hedgehog.Client.PutObjectResult published,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = new SqliteConnection($"Data Source={cluster.MetadataPath}");
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+        var (replicaId, nodeId) = await LoadReplicaAsync(connection, published.VersionId, cancellationToken)
+            .ConfigureAwait(false);
+        await SqliteMetadataAuthority.CreateWorkflowStore().LeaseRepairAsync(
+            connection,
+            new SqliteLeaseRepairRequest(
+                options.TenantId,
+                options.DatasetId,
+                published.ObjectId,
+                published.VersionId,
+                "repair-job-smoke",
+                replicaId,
+                "repair-lease-smoke",
+                nodeId,
+                "under_replicated",
+                100,
+                "local runtime smoke dispatch",
+                DateTimeOffset.UtcNow,
+                TimeSpan.FromMinutes(5),
+                "idem-smoke-repair"),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<(string ReplicaId, string NodeId)> LoadReplicaAsync(
+        SqliteConnection connection,
+        string versionId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT replica_id, node_id
+            FROM replicas
+            WHERE version_id = @version_id
+              AND state = 'healthy'
+            ORDER BY replica_id
+            LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("@version_id", versionId);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            throw new InvalidOperationException("Published smoke object had no healthy replica to repair.");
+        }
+
+        return (reader.GetString(0), reader.GetString(1));
     }
 }

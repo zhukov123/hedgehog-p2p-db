@@ -822,6 +822,18 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
                 request.LeasedAt,
                 cancellationToken).ConfigureAwait(false);
 
+            await AppendOutboxAsync(
+                db,
+                transaction,
+                $"{request.IdempotencyKey}:outbox",
+                MetadataWorkflowNames.LeaseRepair,
+                request.HolderNodeId,
+                "repair.leased",
+                Encoding.UTF8.GetBytes($"{request.TenantId}/{request.DatasetId}/{request.ObjectId}/{request.VersionId}/{request.JobId}"),
+                $"{request.IdempotencyKey}:outbox",
+                request.LeasedAt,
+                cancellationToken).ConfigureAwait(false);
+
             await CompleteIdempotencyAsync(db, transaction, request.IdempotencyKey, request.LeasedAt, cancellationToken)
                 .ConfigureAwait(false);
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
@@ -1200,6 +1212,47 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
         }
     }
 
+    public async Task<SqliteAcknowledgeOutboxResult> AcknowledgeOutboxAsync(
+        IDbConnection connection,
+        SqliteAcknowledgeOutboxRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateAcknowledgeOutbox(request);
+        var db = RequireDbConnection(connection);
+        await EnsureOpenAsync(db, cancellationToken).ConfigureAwait(false);
+        await using var transaction = await db.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            var deliveredAtMs = ToUnixMs(request.DeliveredAt);
+            var rows = await ExecuteAsync(
+                db,
+                transaction,
+                """
+                UPDATE outbox_events
+                SET delivered_at_ms = @delivered_at_ms
+                WHERE outbox_id = @outbox_id
+                  AND claimed_by = @claimed_by
+                  AND claimed_until_ms = @claimed_until_ms
+                  AND delivered_at_ms IS NULL
+                  AND claimed_until_ms > @delivered_at_ms;
+                """,
+                cancellationToken,
+                ("@outbox_id", request.OutboxId),
+                ("@claimed_by", request.ClaimedBy),
+                ("@claimed_until_ms", ToUnixMs(request.ClaimedUntil)),
+                ("@delivered_at_ms", deliveredAtMs)).ConfigureAwait(false);
+
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return new SqliteAcknowledgeOutboxResult(rows == 1);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
+    }
+
     private static async Task<IReadOnlyList<SqliteClaimedOutboxEvent>> ClaimOutboxRowsAsync(
         DbConnection connection,
         DbTransaction transaction,
@@ -1429,6 +1482,51 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
             ("@idempotency_key", idempotencyKey),
             ("@occurred_at_ms", ToUnixMs(occurredAt)));
 
+    private static Task AppendOutboxAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        string outboxId,
+        string workflow,
+        string? destinationNodeId,
+        string topic,
+        byte[] payload,
+        string idempotencyKey,
+        DateTimeOffset availableAt,
+        CancellationToken cancellationToken) =>
+        ExecuteAsync(
+            connection,
+            transaction,
+            """
+            INSERT INTO outbox_events (
+                outbox_id,
+                workflow,
+                destination_node_id,
+                topic,
+                payload,
+                idempotency_key,
+                available_at_ms,
+                created_at_ms
+            )
+            VALUES (
+                @outbox_id,
+                @workflow,
+                @destination_node_id,
+                @topic,
+                @payload,
+                @idempotency_key,
+                @available_at_ms,
+                @available_at_ms
+            );
+            """,
+            cancellationToken,
+            ("@outbox_id", outboxId),
+            ("@workflow", workflow),
+            ("@destination_node_id", destinationNodeId),
+            ("@topic", topic),
+            ("@payload", payload),
+            ("@idempotency_key", idempotencyKey),
+            ("@available_at_ms", ToUnixMs(availableAt)));
+
     private static async Task<int> ExecuteAsync(
         DbConnection connection,
         DbTransaction transaction,
@@ -1634,6 +1732,12 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
         {
             RequireText(request.Topic, nameof(request.Topic));
         }
+    }
+
+    private static void ValidateAcknowledgeOutbox(SqliteAcknowledgeOutboxRequest request)
+    {
+        RequireText(request.OutboxId, nameof(request.OutboxId));
+        RequireText(request.ClaimedBy, nameof(request.ClaimedBy));
     }
 
     private static void RequireKnownLabel(IReadOnlyList<LabelSpec> labels, string value, string name)

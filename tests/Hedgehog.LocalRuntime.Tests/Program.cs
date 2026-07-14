@@ -14,8 +14,10 @@ try
     Equal(2, result.PublishedObjects);
     Equal(2, result.VerifiedRetrievals);
     Equal(true, result.DeleteVerified);
+    Equal(1, result.DispatchedOutboxEvents);
     Equal(2, result.MetadataObjectRows);
     Equal(6, result.HealthyReplicaRows);
+    Equal(1, result.DeliveredOutboxRows);
 
     await MultiTenantIsolationAndDeleteAsync(Path.Combine(runtimeRoot, "isolation"));
     await StressScenarioAsync(Path.Combine(runtimeRoot, "stress"));

@@ -276,6 +276,34 @@ public sealed class LocalHeadNode : IHeadNode
         }
     }
 
+    public async Task<OutboxDispatchResult> DispatchOutboxAsync(
+        IOutboxPublisher publisher,
+        int maxItems,
+        TimeSpan leaseDuration,
+        string? topic = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(publisher);
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            RequireRunning();
+            var dispatcher = new HeadOutboxDispatcher(connection, workflowStore, publisher);
+            return await dispatcher.DispatchOnceAsync(
+                new OutboxDispatchOptions(
+                    WorkerId: HeadId,
+                    leaseDuration,
+                    maxItems,
+                    DestinationNodeId: null,
+                    topic),
+                cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
     private async Task<IReadOnlyList<IStorageAgentNode>> SelectStorageNodesAsync(
         long requiredBytes,
         CancellationToken cancellationToken)

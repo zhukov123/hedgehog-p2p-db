@@ -1,11 +1,13 @@
 using System.Collections.Concurrent;
 using System.Text;
+using Hedgehog.Head;
 using Hedgehog.LocalRuntime;
 
 internal sealed class LocalRuntimeMetrics
 {
     private readonly ConcurrentDictionary<string, long> operationCounts = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, long> operationLatencyMilliseconds = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, long> outboxDispatchCounts = new(StringComparer.Ordinal);
     private long bytesWritten;
     private long bytesRead;
 
@@ -36,9 +38,17 @@ internal sealed class LocalRuntimeMetrics
         }
     }
 
+    public void RecordOutboxDispatch(OutboxDispatchResult result)
+    {
+        outboxDispatchCounts.AddOrUpdate("claimed", result.Claimed, (_, current) => current + result.Claimed);
+        outboxDispatchCounts.AddOrUpdate("delivered", result.Delivered, (_, current) => current + result.Delivered);
+        outboxDispatchCounts.AddOrUpdate("failed", result.Failed, (_, current) => current + result.Failed);
+    }
+
     public string RenderPrometheus(
         LocalClusterSnapshot snapshot,
-        IReadOnlyDictionary<string, long> metadataCounts)
+        IReadOnlyDictionary<string, long> metadataCounts,
+        LocalOutboxSnapshot outbox)
     {
         var builder = new StringBuilder();
         builder.AppendLine("# HELP hedgehog_runtime_operations_total Total local runtime API operations.");
@@ -101,6 +111,24 @@ internal sealed class LocalRuntimeMetrics
         {
             builder.AppendLine($"hedgehog_runtime_metadata_rows{{table=\"{Escape(table)}\"}} {count}");
         }
+
+        builder.AppendLine("# HELP hedgehog_runtime_outbox_dispatch_total Local runtime outbox dispatch results.");
+        builder.AppendLine("# TYPE hedgehog_runtime_outbox_dispatch_total counter");
+        foreach (var result in new[] { "claimed", "delivered", "failed" })
+        {
+            outboxDispatchCounts.TryGetValue(result, out var count);
+            builder.AppendLine($"hedgehog_runtime_outbox_dispatch_total{{result=\"{result}\"}} {count}");
+        }
+
+        builder.AppendLine("# HELP hedgehog_runtime_outbox_rows SQLite outbox rows by dispatcher state.");
+        builder.AppendLine("# TYPE hedgehog_runtime_outbox_rows gauge");
+        builder.AppendLine($"hedgehog_runtime_outbox_rows{{state=\"pending\"}} {outbox.PendingRows}");
+        builder.AppendLine($"hedgehog_runtime_outbox_rows{{state=\"leased\"}} {outbox.LeasedRows}");
+        builder.AppendLine($"hedgehog_runtime_outbox_rows{{state=\"failed\"}} {outbox.FailedRows}");
+        builder.AppendLine($"hedgehog_runtime_outbox_rows{{state=\"delivered\"}} {outbox.DeliveredRows}");
+        builder.AppendLine("# HELP hedgehog_runtime_outbox_oldest_pending_age_seconds Oldest undelivered unleased outbox row age.");
+        builder.AppendLine("# TYPE hedgehog_runtime_outbox_oldest_pending_age_seconds gauge");
+        builder.AppendLine($"hedgehog_runtime_outbox_oldest_pending_age_seconds {outbox.OldestPendingAgeSeconds}");
 
         return builder.ToString();
     }

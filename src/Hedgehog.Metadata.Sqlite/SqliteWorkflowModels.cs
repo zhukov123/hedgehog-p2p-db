@@ -135,6 +135,15 @@ public sealed record SqliteClaimedOutboxEvent(
     DateTimeOffset ClaimedUntil,
     DateTimeOffset CreatedAt);
 
+public sealed record SqliteAcknowledgeOutboxRequest(
+    string OutboxId,
+    string ClaimedBy,
+    DateTimeOffset ClaimedUntil,
+    DateTimeOffset DeliveredAt);
+
+public sealed record SqliteAcknowledgeOutboxResult(
+    bool Delivered);
+
 public sealed record SqliteWorkflowResult(
     string Workflow,
     string State,
@@ -190,5 +199,10 @@ public interface ISqliteMetadataWorkflowStore
     Task<SqliteClaimOutboxResult> ClaimOutboxAsync(
         IDbConnection connection,
         SqliteClaimOutboxRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<SqliteAcknowledgeOutboxResult> AcknowledgeOutboxAsync(
+        IDbConnection connection,
+        SqliteAcknowledgeOutboxRequest request,
         CancellationToken cancellationToken = default);
 }

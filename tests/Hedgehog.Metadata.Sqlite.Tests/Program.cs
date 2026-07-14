@@ -430,6 +430,40 @@ static async Task ClaimOutboxClaimsEligibleEventsAsync(SqliteConnection connecti
     Equal(2, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM outbox_events WHERE claimed_by = 'node-a' AND claimed_until_ms IS NOT NULL;"));
     Equal(0, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM outbox_events WHERE outbox_id IN ('outbox-node-b', 'outbox-future', 'outbox-delivered') AND claimed_by = 'node-a';"));
 
+    var acknowledged = await workflowStore.AcknowledgeOutboxAsync(
+        connection,
+        new SqliteAcknowledgeOutboxRequest(
+            "outbox-broadcast",
+            "node-a",
+            firstClaim.Events[0].ClaimedUntil,
+            now.AddSeconds(30)));
+
+    Equal(true, acknowledged.Delivered);
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM outbox_events WHERE outbox_id = 'outbox-broadcast' AND delivered_at_ms IS NOT NULL;"));
+    Equal(0, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM outbox_events WHERE outbox_id = 'outbox-node-a' AND delivered_at_ms IS NOT NULL;"));
+
+    var wrongWorkerAck = await workflowStore.AcknowledgeOutboxAsync(
+        connection,
+        new SqliteAcknowledgeOutboxRequest(
+            "outbox-node-a",
+            "other-worker",
+            firstClaim.Events[1].ClaimedUntil,
+            now.AddSeconds(31)));
+
+    Equal(false, wrongWorkerAck.Delivered);
+    Equal(0, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM outbox_events WHERE outbox_id = 'outbox-node-a' AND delivered_at_ms IS NOT NULL;"));
+
+    var expiredLeaseAck = await workflowStore.AcknowledgeOutboxAsync(
+        connection,
+        new SqliteAcknowledgeOutboxRequest(
+            "outbox-node-a",
+            "node-a",
+            firstClaim.Events[1].ClaimedUntil,
+            now.AddMinutes(3)));
+
+    Equal(false, expiredLeaseAck.Delivered);
+    Equal(0, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM outbox_events WHERE outbox_id = 'outbox-node-a' AND delivered_at_ms IS NOT NULL;"));
+
     var immediateReplayClaim = await workflowStore.ClaimOutboxAsync(
         connection,
         new SqliteClaimOutboxRequest(
@@ -458,6 +492,28 @@ static async Task ClaimOutboxClaimsEligibleEventsAsync(SqliteConnection connecti
     Equal("outbox-unexpired", expiredClaim.Events[0].OutboxId);
     Equal(1, expiredClaim.Events[0].AttemptCount);
     Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM outbox_events WHERE outbox_id = 'outbox-unexpired' AND claimed_by = 'node-a';"));
+
+    var staleReclaimedAck = await workflowStore.AcknowledgeOutboxAsync(
+        connection,
+        new SqliteAcknowledgeOutboxRequest(
+            "outbox-unexpired",
+            "other-worker",
+            now.AddMinutes(2),
+            now.AddMinutes(3).AddSeconds(10)));
+
+    Equal(false, staleReclaimedAck.Delivered);
+    Equal(0, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM outbox_events WHERE outbox_id = 'outbox-unexpired' AND delivered_at_ms IS NOT NULL;"));
+
+    var reclaimedAck = await workflowStore.AcknowledgeOutboxAsync(
+        connection,
+        new SqliteAcknowledgeOutboxRequest(
+            "outbox-unexpired",
+            "node-a",
+            expiredClaim.Events[0].ClaimedUntil,
+            now.AddMinutes(3).AddSeconds(10)));
+
+    Equal(true, reclaimedAck.Delivered);
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM outbox_events WHERE outbox_id = 'outbox-unexpired' AND delivered_at_ms IS NOT NULL;"));
 }
 
 static async Task ExpireReservationRejectsEarlyExpiryAsync(SqliteConnection connection)

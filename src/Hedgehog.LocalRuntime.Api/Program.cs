@@ -77,9 +77,34 @@ app.MapGet("/metrics", async (
 {
     var snapshot = await runtime.SnapshotAsync(cancellationToken);
     var metadataCounts = await LoadMetadataCountsAsync(runtime, cancellationToken);
+    var outbox = await runtime.OutboxSnapshotAsync(cancellationToken);
     return Results.Text(
-        metrics.RenderPrometheus(snapshot, metadataCounts),
+        metrics.RenderPrometheus(snapshot, metadataCounts, outbox),
         "text/plain; version=0.0.4; charset=utf-8");
+});
+
+app.MapPost("/runtime/outbox/dispatch", async (
+    DispatchOutboxRequest request,
+    LocalCluster runtime,
+    LocalRuntimeMetrics metrics,
+    CancellationToken cancellationToken) =>
+{
+    var result = await runtime.DispatchOutboxAsync(
+        request.MaxItems <= 0 ? 25 : request.MaxItems,
+        request.LeaseSeconds <= 0 ? TimeSpan.FromSeconds(30) : TimeSpan.FromSeconds(request.LeaseSeconds),
+        string.IsNullOrWhiteSpace(request.Topic) ? null : request.Topic,
+        cancellationToken);
+    metrics.RecordOutboxDispatch(result);
+    var state = await runtime.OutboxSnapshotAsync(cancellationToken);
+    return Results.Ok(new DispatchOutboxResponse(
+        result.Claimed,
+        result.Delivered,
+        result.Failed,
+        state.PendingRows,
+        state.LeasedRows,
+        state.FailedRows,
+        state.DeliveredRows,
+        state.OldestPendingAgeSeconds));
 });
 
 app.MapPost("/runtime/tenants", async (
@@ -263,6 +288,8 @@ public sealed record CreateTenantRequest(string TenantId, string DatasetId);
 
 public sealed record PutObjectRequest(string ClientId, string Name, string Text, bool PreferLastHead = false);
 
+public sealed record DispatchOutboxRequest(int MaxItems = 25, int LeaseSeconds = 30, string? Topic = null);
+
 public sealed record ErrorDto(string Error);
 
 public sealed record HealthLiveDto(
@@ -327,5 +354,15 @@ public sealed record DeleteObjectResponse(
     string DatasetId,
     string Name,
     bool Deleted);
+
+public sealed record DispatchOutboxResponse(
+    int Claimed,
+    int Delivered,
+    int Failed,
+    long PendingRows,
+    long LeasedRows,
+    long FailedRows,
+    long DeliveredRows,
+    long OldestPendingAgeSeconds);
 
 public partial class Program;
