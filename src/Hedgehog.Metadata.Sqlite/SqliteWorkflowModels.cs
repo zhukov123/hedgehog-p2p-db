@@ -115,11 +115,35 @@ public sealed record SqliteCapacityReportRequest(
     string IdempotencyKey,
     byte[]? RawReport = null);
 
+public sealed record SqliteClaimOutboxRequest(
+    string ClaimedBy,
+    DateTimeOffset ClaimedAt,
+    TimeSpan ClaimDuration,
+    int MaxItems,
+    string? DestinationNodeId = null,
+    string? Topic = null);
+
+public sealed record SqliteClaimedOutboxEvent(
+    string OutboxId,
+    string Workflow,
+    string? DestinationNodeId,
+    string Topic,
+    byte[] Payload,
+    string IdempotencyKey,
+    int AttemptCount,
+    DateTimeOffset AvailableAt,
+    DateTimeOffset ClaimedUntil,
+    DateTimeOffset CreatedAt);
+
 public sealed record SqliteWorkflowResult(
     string Workflow,
     string State,
     bool Replayed,
     IReadOnlyList<string> OutboxTopics);
+
+public sealed record SqliteClaimOutboxResult(
+    SqliteWorkflowResult WorkflowResult,
+    IReadOnlyList<SqliteClaimedOutboxEvent> Events);
 
 public interface ISqliteMetadataWorkflowStore
 {
@@ -161,5 +185,10 @@ public interface ISqliteMetadataWorkflowStore
     Task<SqliteWorkflowResult> RecordCapacityReportAsync(
         IDbConnection connection,
         SqliteCapacityReportRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<SqliteClaimOutboxResult> ClaimOutboxAsync(
+        IDbConnection connection,
+        SqliteClaimOutboxRequest request,
         CancellationToken cancellationToken = default);
 }
