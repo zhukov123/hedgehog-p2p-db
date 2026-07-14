@@ -18,7 +18,7 @@
   - `dotnet run --project tools/Hedgehog.Xtask -- run-local-restore-drill`
   - `dotnet format Hedgehog.sln --verify-no-changes`
 - Container coverage: blocked because `docker` is not installed in the VM; local multi-head/multi-storage-node smoke, stress, and restore drills were run instead.
-- PR: pending.
+- PR: https://github.com/zhukov123/hedgehog-p2p-db/pull/13
 - Next candidate task: implement the remaining SQLite `evaluate_recovery_gate` workflow or the `accept_invite` workflow.
 
 ## 2026-07-13 - claim outbox workflow
