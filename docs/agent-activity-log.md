@@ -16,6 +16,7 @@
   - `dotnet run --project tools/Hedgehog.Xtask -- run-local-restore-drill`
   - `dotnet format Hedgehog.sln --verify-no-changes`
 - Container coverage: blocked because `docker` is not installed in the VM; local multi-head/multi-storage-node smoke, stress, and restore drills were run instead.
+- PR: https://github.com/zhukov123/hedgehog-p2p-db/pull/14
 - Severus: direct `sessions_send` failed with `agent not found: severus`; visible session search returned none. Handoff sent in Discord `#agentchat` message `1526516069496389762`; Severus replied in auto-thread `1526516069496389762` recommending `CompleteOutboxDeliveryAsync` as the next tight PR, with a warning to preserve at-least-once semantics and avoid pretending delivered rows are exactly-once without worker attribution.
 - Next candidate task: implement the outbox delivery acknowledgement workflow before wiring a publisher; then wire recovery gate results into the local runtime/admin status surface or implement the remaining `accept_invite` SQLite workflow after the open revocation PR lands.
 
