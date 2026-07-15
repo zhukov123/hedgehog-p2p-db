@@ -1160,6 +1160,185 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
         }
     }
 
+    public async Task<SqliteWorkflowResult> AcceptInviteAsync(
+        IDbConnection connection,
+        SqliteAcceptInviteRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateAcceptInvite(request);
+        var db = RequireDbConnection(connection);
+        await EnsureOpenAsync(db, cancellationToken).ConfigureAwait(false);
+        await using var transaction = await db.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            var replay = await TryBeginIdempotencyAsync(
+                db,
+                transaction,
+                request.IdempotencyKey,
+                request.TenantId,
+                datasetId: null,
+                MetadataWorkflowNames.AcceptInvite,
+                actorId: null,
+                request,
+                request.AcceptedAt,
+                cancellationToken).ConfigureAwait(false);
+
+            if (replay)
+            {
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                return new SqliteWorkflowResult(MetadataWorkflowNames.AcceptInvite, "replayed", Replayed: true, []);
+            }
+
+            var invitation = await LoadInvitationAsync(db, transaction, request, cancellationToken).ConfigureAwait(false);
+            if (invitation is null)
+            {
+                throw new InvalidOperationException("Active invitation was not found for the supplied tenant and token.");
+            }
+
+            var acceptedAtMs = ToUnixMs(request.AcceptedAt);
+            if (invitation.ExpiresAtMs is not null && invitation.ExpiresAtMs <= acceptedAtMs)
+            {
+                throw new InvalidOperationException("Invitation has expired.");
+            }
+
+            if (invitation.UseCount >= invitation.MaxUses)
+            {
+                throw new InvalidOperationException("Invitation has no remaining uses.");
+            }
+
+            var acceptedActorId = request.TargetKind == "actor" ? request.AcceptedActorId : null;
+            var acceptedNodeId = request.TargetKind == "node" ? request.AcceptedNodeId : null;
+            if (request.TargetKind == "actor")
+            {
+                await ExecuteAsync(
+                    db,
+                    transaction,
+                    """
+                    INSERT INTO actors (
+                        actor_id,
+                        tenant_id,
+                        display_name,
+                        actor_kind,
+                        public_key_fingerprint,
+                        state,
+                        created_at_ms
+                    )
+                    VALUES (
+                        @actor_id,
+                        @tenant_id,
+                        @display_name,
+                        @actor_kind,
+                        @public_key_fingerprint,
+                        'active',
+                        @accepted_at_ms
+                    );
+                    """,
+                    cancellationToken,
+                    ("@actor_id", request.AcceptedActorId),
+                    ("@tenant_id", request.TenantId),
+                    ("@display_name", request.ActorDisplayName),
+                    ("@actor_kind", request.ActorKind),
+                    ("@public_key_fingerprint", request.ActorPublicKeyFingerprint),
+                    ("@accepted_at_ms", acceptedAtMs)).ConfigureAwait(false);
+            }
+            else
+            {
+                await ExecuteAsync(
+                    db,
+                    transaction,
+                    """
+                    INSERT INTO nodes (
+                        node_id,
+                        tenant_id,
+                        display_name,
+                        advertise_endpoint,
+                        trust_domain,
+                        public_key_fingerprint,
+                        state,
+                        capacity_pressure,
+                        degraded_mode,
+                        capacity_bytes,
+                        used_bytes,
+                        reserved_bytes,
+                        free_bytes,
+                        joined_at_ms,
+                        last_seen_at_ms
+                    )
+                    VALUES (
+                        @node_id,
+                        @tenant_id,
+                        @display_name,
+                        @advertise_endpoint,
+                        @trust_domain,
+                        @public_key_fingerprint,
+                        'active',
+                        'normal',
+                        'normal',
+                        0,
+                        0,
+                        0,
+                        0,
+                        @accepted_at_ms,
+                        @accepted_at_ms
+                    );
+                    """,
+                    cancellationToken,
+                    ("@node_id", request.AcceptedNodeId),
+                    ("@tenant_id", request.TenantId),
+                    ("@display_name", request.NodeDisplayName),
+                    ("@advertise_endpoint", request.NodeAdvertiseEndpoint),
+                    ("@trust_domain", request.TrustDomain),
+                    ("@public_key_fingerprint", request.NodePublicKeyFingerprint),
+                    ("@accepted_at_ms", acceptedAtMs)).ConfigureAwait(false);
+            }
+
+            var nextUseCount = invitation.UseCount + 1;
+            await ExecuteAsync(
+                db,
+                transaction,
+                """
+                UPDATE invitations
+                SET accepted_by_actor_id = @accepted_by_actor_id,
+                    state = CASE WHEN @next_use_count >= max_uses THEN 'accepted' ELSE state END,
+                    use_count = @next_use_count,
+                    accepted_at_ms = @accepted_at_ms
+                WHERE invitation_id = @invitation_id
+                  AND tenant_id = @tenant_id
+                  AND state = 'active'
+                  AND token_hash = @token_hash;
+                """,
+                cancellationToken,
+                ("@accepted_by_actor_id", acceptedActorId),
+                ("@next_use_count", nextUseCount),
+                ("@accepted_at_ms", acceptedAtMs),
+                ("@invitation_id", request.InvitationId),
+                ("@tenant_id", request.TenantId),
+                ("@token_hash", request.TokenHash)).ConfigureAwait(false);
+
+            await AppendPrincipalAuditAsync(
+                db,
+                transaction,
+                MetadataWorkflowNames.AcceptInvite,
+                "allowed",
+                acceptedActorId,
+                acceptedNodeId,
+                request.IdempotencyKey,
+                request.AcceptedAt,
+                cancellationToken).ConfigureAwait(false);
+
+            await CompleteIdempotencyAsync(db, transaction, request.IdempotencyKey, request.AcceptedAt, cancellationToken)
+                .ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return new SqliteWorkflowResult(MetadataWorkflowNames.AcceptInvite, "accepted", Replayed: false, []);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
+    }
+
     public async Task<SqliteClaimOutboxResult> ClaimOutboxAsync(
         IDbConnection connection,
         SqliteClaimOutboxRequest request,
@@ -1270,6 +1449,43 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
         }
 
         return events;
+    }
+
+    private sealed record InvitationRow(long MaxUses, long UseCount, long? ExpiresAtMs);
+
+    private static async Task<InvitationRow?> LoadInvitationAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        SqliteAcceptInviteRequest request,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText =
+            """
+            SELECT max_uses, use_count, expires_at_ms
+            FROM invitations
+            WHERE invitation_id = @invitation_id
+              AND tenant_id = @tenant_id
+              AND state = 'active'
+              AND token_hash = @token_hash;
+            """;
+        AddParameters(
+            command,
+            ("@invitation_id", request.InvitationId),
+            ("@tenant_id", request.TenantId),
+            ("@token_hash", request.TokenHash));
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            return null;
+        }
+
+        return new InvitationRow(
+            reader.GetInt64(0),
+            reader.GetInt64(1),
+            reader.IsDBNull(2) ? null : reader.GetInt64(2));
     }
 
     private static async Task<bool> TryBeginIdempotencyAsync(
@@ -1425,6 +1641,45 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
             cancellationToken,
             ("@workflow", workflow),
             ("@decision", decision),
+            ("@node_id", nodeId),
+            ("@idempotency_key", idempotencyKey),
+            ("@occurred_at_ms", ToUnixMs(occurredAt)));
+
+    private static Task AppendPrincipalAuditAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        string workflow,
+        string decision,
+        string? actorId,
+        string? nodeId,
+        string idempotencyKey,
+        DateTimeOffset occurredAt,
+        CancellationToken cancellationToken) =>
+        ExecuteAsync(
+            connection,
+            transaction,
+            """
+            INSERT INTO audit_events (
+                workflow,
+                decision,
+                actor_id,
+                node_id,
+                idempotency_key,
+                occurred_at_ms
+            )
+            VALUES (
+                @workflow,
+                @decision,
+                @actor_id,
+                @node_id,
+                @idempotency_key,
+                @occurred_at_ms
+            );
+            """,
+            cancellationToken,
+            ("@workflow", workflow),
+            ("@decision", decision),
+            ("@actor_id", actorId),
             ("@node_id", nodeId),
             ("@idempotency_key", idempotencyKey),
             ("@occurred_at_ms", ToUnixMs(occurredAt)));
@@ -1620,6 +1875,45 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
         RequireCapacityAccounting(request);
     }
 
+    private static void ValidateAcceptInvite(SqliteAcceptInviteRequest request)
+    {
+        RequireText(request.TenantId, nameof(request.TenantId));
+        RequireText(request.InvitationId, nameof(request.InvitationId));
+        RequireBytes(request.TokenHash, nameof(request.TokenHash));
+        RequireText(request.TargetKind, nameof(request.TargetKind));
+        RequireText(request.IdempotencyKey, nameof(request.IdempotencyKey));
+
+        if (request.TargetKind == "actor")
+        {
+            RequireText(request.AcceptedActorId ?? string.Empty, nameof(request.AcceptedActorId));
+            RequireText(request.ActorDisplayName ?? string.Empty, nameof(request.ActorDisplayName));
+            RequireText(request.ActorKind ?? string.Empty, nameof(request.ActorKind));
+            RequireText(request.ActorPublicKeyFingerprint ?? string.Empty, nameof(request.ActorPublicKeyFingerprint));
+            RequireKnownActorKind(request.ActorKind);
+            return;
+        }
+
+        if (request.TargetKind == "node")
+        {
+            RequireText(request.AcceptedNodeId ?? string.Empty, nameof(request.AcceptedNodeId));
+            RequireText(request.NodeDisplayName ?? string.Empty, nameof(request.NodeDisplayName));
+            RequireText(request.NodePublicKeyFingerprint ?? string.Empty, nameof(request.NodePublicKeyFingerprint));
+            if (request.NodeAdvertiseEndpoint is not null)
+            {
+                RequireText(request.NodeAdvertiseEndpoint, nameof(request.NodeAdvertiseEndpoint));
+            }
+
+            if (request.TrustDomain is not null)
+            {
+                RequireText(request.TrustDomain, nameof(request.TrustDomain));
+            }
+
+            return;
+        }
+
+        throw new ArgumentOutOfRangeException(nameof(request.TargetKind), request.TargetKind, "TargetKind must be either 'actor' or 'node'.");
+    }
+
     private static void ValidateClaimOutbox(SqliteClaimOutboxRequest request)
     {
         RequireText(request.ClaimedBy, nameof(request.ClaimedBy));
@@ -1633,6 +1927,14 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
         if (request.Topic is not null)
         {
             RequireText(request.Topic, nameof(request.Topic));
+        }
+    }
+
+    private static void RequireKnownActorKind(string? value)
+    {
+        if (value is not ("user" or "admin" or "head" or "agent" or "system"))
+        {
+            throw new ArgumentOutOfRangeException(nameof(value), value, "ActorKind must be a known actor kind.");
         }
     }
 
