@@ -17,7 +17,7 @@
   - `dotnet format Hedgehog.sln --verify-no-changes`
   - `docker compose -f observability/docker-compose.yml config`
 - Container coverage: Docker is installed; `docker compose -f observability/docker-compose.yml config` validated the current observability compose file. The repo still does not include a full app multi-container compose stack, so runtime coverage used the local two-head/three-storage-node smoke, stress, and restore drills.
-- PR: pending.
+- PR: https://github.com/zhukov123/hedgehog-p2p-db/pull/15
 - Severus handoff: direct `sessions_send agentId: severus` was unavailable (`agent not found`); Discord handoff posted in guild `1449223265590710426`, channel `1473509684135596285`, message `1526749503376457784`.
 - Next candidate task: implement the remaining SQLite `evaluate_recovery_gate` workflow or continue storage-agent crash/restart journaling.
 
