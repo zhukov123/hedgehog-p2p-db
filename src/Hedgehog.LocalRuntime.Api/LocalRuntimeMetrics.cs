@@ -25,11 +25,11 @@ internal sealed class LocalRuntimeMetrics
 
         if (bytes > 0)
         {
-            if (operation == "put")
+            if (operation is "put" or "demo_put")
             {
                 Interlocked.Add(ref bytesWritten, bytes);
             }
-            else if (operation == "get")
+            else if (operation is "get" or "demo_get")
             {
                 Interlocked.Add(ref bytesRead, bytes);
             }
@@ -38,7 +38,8 @@ internal sealed class LocalRuntimeMetrics
 
     public string RenderPrometheus(
         LocalClusterSnapshot snapshot,
-        IReadOnlyDictionary<string, long> metadataCounts)
+        IReadOnlyDictionary<string, long> metadataCounts,
+        DemoTrafficSnapshotDto demoTraffic)
     {
         var builder = new StringBuilder();
         builder.AppendLine("# HELP hedgehog_runtime_operations_total Total local runtime API operations.");
@@ -101,6 +102,16 @@ internal sealed class LocalRuntimeMetrics
         {
             builder.AppendLine($"hedgehog_runtime_metadata_rows{{table=\"{Escape(table)}\"}} {count}");
         }
+
+        builder.AppendLine("# HELP hedgehog_runtime_demo_traffic_success_total Generated demo traffic successes.");
+        builder.AppendLine("# TYPE hedgehog_runtime_demo_traffic_success_total counter");
+        builder.AppendLine($"hedgehog_runtime_demo_traffic_success_total {demoTraffic.SuccessCount}");
+        builder.AppendLine("# HELP hedgehog_runtime_demo_traffic_failure_total Generated demo traffic failures.");
+        builder.AppendLine("# TYPE hedgehog_runtime_demo_traffic_failure_total counter");
+        builder.AppendLine($"hedgehog_runtime_demo_traffic_failure_total {demoTraffic.FailureCount}");
+        builder.AppendLine("# HELP hedgehog_runtime_demo_traffic_enabled Generated demo traffic enabled flag.");
+        builder.AppendLine("# TYPE hedgehog_runtime_demo_traffic_enabled gauge");
+        builder.AppendLine($"hedgehog_runtime_demo_traffic_enabled {(demoTraffic.Enabled ? 1 : 0)}");
 
         return builder.ToString();
     }

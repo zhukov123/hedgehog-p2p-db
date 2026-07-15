@@ -160,6 +160,41 @@ curl -fsS http://localhost:5090/health/cluster
 
 `/health/ready` returns HTTP 200 only when metadata is queryable and all in-process heads and storage nodes are running. `/health/cluster` returns the same readiness contract with counts for tenants, heads, storage nodes, metadata availability, and the runtime paths.
 
+## Live Multi-Node Demo Endpoint
+
+The local runtime API exposes a live demo status surface for hosted or owner-reachable deployments:
+
+```text
+curl -fsS http://localhost:5090/runtime/demo
+curl -fsS -X POST http://localhost:5090/runtime/demo/traffic/run-once
+```
+
+`/runtime/demo` renders the current health contract, real head and storage-node counts, storage capacity and replica counts, SQLite metadata row counts, and generated-traffic counters. The API also starts a low-volume background traffic runner by default. The runner writes and reads encrypted objects through alternating heads, deletes every third generated object, and records recent activity plus success and failure counters in `/runtime/demo` and `/metrics`.
+
+Traffic runner knobs:
+
+```text
+HEDGEHOG_DEMO_TRAFFIC_ENABLED=false
+HEDGEHOG_DEMO_TRAFFIC_INTERVAL_SECONDS=30
+```
+
+Reproducible local demo runbook:
+
+```text
+dotnet build Hedgehog.sln
+
+HEDGEHOG_RUNTIME_ROOT="$(pwd)/.hedgehog/demo-runtime" HEDGEHOG_RUNTIME_RESET=true \
+  HEDGEHOG_DEMO_TRAFFIC_INTERVAL_SECONDS=30 \
+  dotnet run --project src/Hedgehog.LocalRuntime.Api --urls http://localhost:5090
+
+curl -fsS http://localhost:5090/health/ready
+curl -fsS http://localhost:5090/runtime/demo
+curl -fsS -X POST http://localhost:5090/runtime/demo/traffic/run-once
+curl -fsS http://localhost:5090/metrics
+```
+
+Stop with `Ctrl+C`. Restart with the same `HEDGEHOG_RUNTIME_ROOT` to keep the runtime data, or set `HEDGEHOG_RUNTIME_RESET=true` again for a clean demo. Logs are emitted by `dotnet run`; delete `.hedgehog/demo-runtime` for teardown after stopping the API.
+
 ## Grafana Dashboard
 
 Start the local runtime API, then start Prometheus and Grafana:

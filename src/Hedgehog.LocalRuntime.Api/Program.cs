@@ -28,6 +28,8 @@ await cluster.StartAsync();
 
 builder.Services.AddSingleton<LocalRuntimeMetrics>();
 builder.Services.AddSingleton(cluster);
+builder.Services.AddSingleton<LocalRuntimeDemoTraffic>();
+builder.Services.AddHostedService(static services => services.GetRequiredService<LocalRuntimeDemoTraffic>());
 
 var app = builder.Build();
 app.UseCors();
@@ -70,15 +72,47 @@ app.MapGet("/runtime/status", async (LocalCluster runtime, CancellationToken can
             node.Replicas.Count)).ToArray()));
 });
 
+app.MapGet("/runtime/demo", async (
+    LocalCluster runtime,
+    LocalRuntimeDemoTraffic demoTraffic,
+    CancellationToken cancellationToken) =>
+{
+    var snapshot = await runtime.SnapshotAsync(cancellationToken);
+    var health = await LoadClusterHealthAsync(runtime, cancellationToken);
+    var metadataCounts = await LoadMetadataCountsAsync(runtime, cancellationToken);
+    return Results.Ok(new RuntimeDemoDto(
+        health,
+        new RuntimeDemoNodesDto(
+            snapshot.Heads.Count,
+            snapshot.Heads.Count(head => head.IsRunning),
+            snapshot.StorageNodes.Count,
+            snapshot.StorageNodes.Count(node => node.IsRunning)),
+        snapshot.StorageNodes.Select(node => new StorageNodeStatusDto(
+            node.NodeId,
+            node.IsRunning,
+            node.CapacityBytes,
+            node.UsedBytes,
+            node.FreeBytes,
+            node.Replicas.Count)).ToArray(),
+        metadataCounts,
+        demoTraffic.Snapshot()));
+});
+
+app.MapPost("/runtime/demo/traffic/run-once", async (
+    LocalRuntimeDemoTraffic demoTraffic,
+    CancellationToken cancellationToken) =>
+    Results.Ok(await demoTraffic.RunOnceAsync(cancellationToken)));
+
 app.MapGet("/metrics", async (
     LocalCluster runtime,
     LocalRuntimeMetrics metrics,
+    LocalRuntimeDemoTraffic demoTraffic,
     CancellationToken cancellationToken) =>
 {
     var snapshot = await runtime.SnapshotAsync(cancellationToken);
     var metadataCounts = await LoadMetadataCountsAsync(runtime, cancellationToken);
     return Results.Text(
-        metrics.RenderPrometheus(snapshot, metadataCounts),
+        metrics.RenderPrometheus(snapshot, metadataCounts, demoTraffic.Snapshot()),
         "text/plain; version=0.0.4; charset=utf-8");
 });
 
@@ -291,6 +325,19 @@ public sealed record RuntimeStatusDto(
     IReadOnlyList<LocalTenantSnapshot> Tenants,
     IReadOnlyList<HeadNodeSnapshot> Heads,
     IReadOnlyList<StorageNodeStatusDto> StorageNodes);
+
+public sealed record RuntimeDemoDto(
+    HealthClusterDto Health,
+    RuntimeDemoNodesDto Nodes,
+    IReadOnlyList<StorageNodeStatusDto> StorageNodes,
+    IReadOnlyDictionary<string, long> MetadataCounts,
+    DemoTrafficSnapshotDto Traffic);
+
+public sealed record RuntimeDemoNodesDto(
+    int Heads,
+    int RunningHeads,
+    int StorageNodes,
+    int RunningStorageNodes);
 
 public sealed record StorageNodeStatusDto(
     string NodeId,

@@ -129,6 +129,7 @@ Admin is not a later dashboard. For v1, admin status, repair visibility, audit r
 - [x] Run multiple heads and three storage agents locally in the smoke runtime.
 - [x] Add smoke scenario: create tenant, create dataset, register nodes, upload object, commit replicas, retrieve from another client, and delete.
 - [x] Expose curlable local runtime API for tenant registration, object writes, reads, deletes, and status.
+- [x] Expose live multi-node demo status and generated-traffic endpoints for hosted deployment smoke coverage.
 
 ## Milestone 9: Tests And Release Gate
 
