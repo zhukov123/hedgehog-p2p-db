@@ -3,6 +3,7 @@ using Hedgehog.LocalRuntime.Api;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using System.Net.Http.Json;
+using System.Text.Json;
 
 var runtimeRoot = Path.Combine(Path.GetTempPath(), $"hedgehog-local-runtime-test-{Guid.NewGuid():N}");
 try
@@ -110,6 +111,7 @@ static async Task RuntimeApiHealthEndpointsAsync(string runtimeRoot)
             builder.UseContentRoot(contentRoot);
             builder.UseSetting("runtime-root", runtimeRoot);
             builder.UseSetting("reset-runtime", "true");
+            builder.UseSetting("demo-traffic-enabled", "false");
         });
     using var client = app.CreateClient();
 
@@ -134,6 +136,33 @@ static async Task RuntimeApiHealthEndpointsAsync(string runtimeRoot)
     Equal(ready.TotalHeads, cluster.TotalHeads);
     Equal(ready.TotalStorageNodes, cluster.TotalStorageNodes);
     True(cluster.RuntimeRoot.EndsWith("api-health", StringComparison.Ordinal), "cluster health should expose runtime root");
+
+    using var demoBefore = await client.GetFromJsonAsync<JsonDocument>("/runtime/demo")
+        ?? throw new InvalidOperationException("runtime demo endpoint returned no payload");
+    var demoRoot = demoBefore.RootElement;
+    Equal(true, demoRoot.GetProperty("health").GetProperty("ready").GetBoolean());
+    Equal(2, demoRoot.GetProperty("nodes").GetProperty("heads").GetInt32());
+    Equal(3, demoRoot.GetProperty("nodes").GetProperty("storageNodes").GetInt32());
+    Equal(3, demoRoot.GetProperty("storageNodes").GetArrayLength());
+    Equal(0L, demoRoot.GetProperty("traffic").GetProperty("successCount").GetInt64());
+
+    using var runResponse = await client.PostAsync("/runtime/demo/traffic/run-once", content: null);
+    runResponse.EnsureSuccessStatusCode();
+    using var runResult = await runResponse.Content.ReadFromJsonAsync<JsonDocument>()
+        ?? throw new InvalidOperationException("runtime demo traffic endpoint returned no payload");
+    Equal("ok", runResult.RootElement.GetProperty("result").GetString());
+
+    using var demoAfter = await client.GetFromJsonAsync<JsonDocument>("/runtime/demo")
+        ?? throw new InvalidOperationException("runtime demo endpoint returned no payload after traffic");
+    Equal(1L, demoAfter.RootElement.GetProperty("traffic").GetProperty("successCount").GetInt64());
+    True(
+        demoAfter.RootElement.GetProperty("metadataCounts").GetProperty("objects").GetInt64() >= 1,
+        "demo traffic should create metadata-visible objects");
+
+    var metrics = await client.GetStringAsync("/metrics");
+    True(
+        metrics.Contains("hedgehog_runtime_demo_traffic_success_total 1", StringComparison.Ordinal),
+        "metrics should expose generated demo traffic success counter");
 }
 
 static string FindRepoRoot()
