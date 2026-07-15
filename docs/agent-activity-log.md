@@ -18,7 +18,7 @@
   - Local runtime API started for observability compose preflight; `GET /health/ready` and `GET /metrics` returned HTTP 200.
   - `docker compose -f observability/docker-compose.yml up -d` attempted.
 - Container coverage: blocked because Docker Desktop's Linux engine pipe was unavailable (`npipe:////./pipe/dockerDesktopLinuxEngine`). Local two-head/three-storage-node smoke, stress, and restore drills were run as the closest automated distributed substitute.
-- PR: pending.
+- PR: https://github.com/zhukov123/hedgehog-p2p-db/pull/16
 - Severus handoff: direct `sessions_send agentId: severus` was unavailable (`agent not found`); visible session search found no Severus session; Discord handoff posted in guild `1449223265590710426`, channel `1473509684135596285`, message `1526808507423129661`.
 - Next candidate task: implement the remaining SQLite `evaluate_recovery_gate` workflow or continue storage-agent crash/restart journaling.
 
