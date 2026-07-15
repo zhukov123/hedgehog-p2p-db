@@ -1200,6 +1200,130 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
         }
     }
 
+    public async Task<SqliteWorkflowResult> EvaluateRecoveryGateAsync(
+        IDbConnection connection,
+        SqliteEvaluateRecoveryGateRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateEvaluateRecoveryGate(request);
+        var db = RequireDbConnection(connection);
+        await EnsureOpenAsync(db, cancellationToken).ConfigureAwait(false);
+        await using var transaction = await db.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            var replay = await TryBeginIdempotencyAsync(
+                db,
+                transaction,
+                request.IdempotencyKey,
+                tenantId: null,
+                datasetId: null,
+                MetadataWorkflowNames.EvaluateRecoveryGate,
+                request.ActorId,
+                request,
+                request.EvaluatedAt,
+                cancellationToken).ConfigureAwait(false);
+
+            if (replay)
+            {
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                return new SqliteWorkflowResult(MetadataWorkflowNames.EvaluateRecoveryGate, "replayed", Replayed: true, []);
+            }
+
+            var previous = await ReadStoreGateStateAsync(db, transaction, request.StoreId, cancellationToken).ConfigureAwait(false);
+            if (previous is null)
+            {
+                throw new InvalidOperationException("Metadata store was not found.");
+            }
+
+            var eligibleNodeCount = await ScalarLongAsync(
+                db,
+                transaction,
+                """
+                SELECT COUNT(*)
+                FROM nodes
+                WHERE state NOT IN ('revoked', 'retired');
+                """,
+                cancellationToken).ConfigureAwait(false) ?? 0;
+            var freshNodeCount = await ScalarLongAsync(
+                db,
+                transaction,
+                """
+                SELECT COUNT(*)
+                FROM nodes
+                WHERE state NOT IN ('revoked', 'retired')
+                  AND last_seen_at_ms IS NOT NULL
+                  AND last_seen_at_ms >= @stale_before_ms;
+                """,
+                cancellationToken,
+                ("@stale_before_ms", ToUnixMs(request.EvaluatedAt.Subtract(request.NodeStaleAfter)))).ConfigureAwait(false) ?? 0;
+            var nextPressure = await ScalarStringAsync(
+                db,
+                transaction,
+                """
+                SELECT capacity_pressure
+                FROM nodes
+                WHERE state NOT IN ('revoked', 'retired')
+                ORDER BY CASE capacity_pressure
+                    WHEN 'emergency' THEN 4
+                    WHEN 'critical' THEN 3
+                    WHEN 'pressure' THEN 2
+                    ELSE 1
+                END DESC
+                LIMIT 1;
+                """,
+                cancellationToken).ConfigureAwait(false) ?? "normal";
+            var nextMode = eligibleNodeCount == 0 || freshNodeCount == 0
+                ? "authority_stale"
+                : nextPressure is "critical" or "emergency"
+                    ? "degraded_read_only"
+                    : "normal";
+
+            await ExecuteAsync(
+                db,
+                transaction,
+                """
+                UPDATE metadata_store
+                SET capacity_pressure = @capacity_pressure,
+                    degraded_mode = @degraded_mode,
+                    updated_at_ms = @updated_at_ms
+                WHERE store_id = @store_id;
+                """,
+                cancellationToken,
+                ("@store_id", request.StoreId),
+                ("@capacity_pressure", nextPressure),
+                ("@degraded_mode", nextMode),
+                ("@updated_at_ms", ToUnixMs(request.EvaluatedAt))).ConfigureAwait(false);
+
+            await AppendStoreAuditAsync(
+                db,
+                transaction,
+                MetadataWorkflowNames.EvaluateRecoveryGate,
+                "allowed",
+                request.ActorId,
+                request.IdempotencyKey,
+                request.EvaluatedAt,
+                cancellationToken).ConfigureAwait(false);
+
+            await CompleteIdempotencyAsync(db, transaction, request.IdempotencyKey, request.EvaluatedAt, cancellationToken)
+                .ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+
+            var changed = !string.Equals(previous.CapacityPressure, nextPressure, StringComparison.Ordinal)
+                || !string.Equals(previous.DegradedMode, nextMode, StringComparison.Ordinal);
+            return new SqliteWorkflowResult(
+                MetadataWorkflowNames.EvaluateRecoveryGate,
+                nextMode,
+                Replayed: false,
+                changed ? ["recovery_gate.changed"] : []);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
+    }
+
     private static async Task<IReadOnlyList<SqliteClaimedOutboxEvent>> ClaimOutboxRowsAsync(
         DbConnection connection,
         DbTransaction transaction,
@@ -1270,6 +1394,31 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
         }
 
         return events;
+    }
+
+    private static async Task<StoreGateState?> ReadStoreGateStateAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        string storeId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText =
+            """
+            SELECT capacity_pressure, degraded_mode
+            FROM metadata_store
+            WHERE store_id = @store_id;
+            """;
+        AddParameters(command, ("@store_id", storeId));
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            return null;
+        }
+
+        return new StoreGateState(reader.GetString(0), reader.GetString(1));
     }
 
     private static async Task<bool> TryBeginIdempotencyAsync(
@@ -1391,6 +1540,41 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
             ("@actor_id", actorId),
             ("@object_id", objectId),
             ("@version_id", versionId),
+            ("@idempotency_key", idempotencyKey),
+            ("@occurred_at_ms", ToUnixMs(occurredAt)));
+
+    private static Task AppendStoreAuditAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        string workflow,
+        string decision,
+        string? actorId,
+        string idempotencyKey,
+        DateTimeOffset occurredAt,
+        CancellationToken cancellationToken) =>
+        ExecuteAsync(
+            connection,
+            transaction,
+            """
+            INSERT INTO audit_events (
+                workflow,
+                decision,
+                actor_id,
+                idempotency_key,
+                occurred_at_ms
+            )
+            VALUES (
+                @workflow,
+                @decision,
+                @actor_id,
+                @idempotency_key,
+                @occurred_at_ms
+            );
+            """,
+            cancellationToken,
+            ("@workflow", workflow),
+            ("@decision", decision),
+            ("@actor_id", actorId),
             ("@idempotency_key", idempotencyKey),
             ("@occurred_at_ms", ToUnixMs(occurredAt)));
 
@@ -1636,6 +1820,17 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
         }
     }
 
+    private static void ValidateEvaluateRecoveryGate(SqliteEvaluateRecoveryGateRequest request)
+    {
+        RequireText(request.StoreId, nameof(request.StoreId));
+        RequirePositive(request.NodeStaleAfter, nameof(request.NodeStaleAfter));
+        RequireText(request.IdempotencyKey, nameof(request.IdempotencyKey));
+        if (request.ActorId is not null)
+        {
+            RequireText(request.ActorId, nameof(request.ActorId));
+        }
+    }
+
     private static void RequireKnownLabel(IReadOnlyList<LabelSpec> labels, string value, string name)
     {
         if (!labels.Any(label => string.Equals(label.Wire, value, StringComparison.Ordinal)))
@@ -1703,4 +1898,6 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
             throw new ArgumentOutOfRangeException(name, value, $"{name} must be non-negative.");
         }
     }
+
+    private sealed record StoreGateState(string CapacityPressure, string DegradedMode);
 }
