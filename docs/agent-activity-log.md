@@ -19,7 +19,7 @@
   - `dotnet format Hedgehog.sln --verify-no-changes`
 - Container coverage: `docker compose config` passed; container startup was blocked because Docker Desktop's Linux engine was not running (`npipe:////./pipe/dockerDesktopLinuxEngine` missing). Local multi-head/multi-storage-node smoke, stress, and restore drills passed instead.
 - Severus: direct `sessions_send` with `agentId: severus` failed, visible session search found no Severus session, so the handoff was posted to shared Discord `#agentchat` message/thread `1527059894128345261`; no concrete branch review was visible before PR prep.
-- PR: pending.
+- PR: https://github.com/zhukov123/hedgehog-p2p-db/pull/19
 - Next candidate task: implement `revoke_actor_or_node` with durable outbox rows and audit reason preservation, or add storage-agent crash/restart reconciliation tests.
 
 ## 2026-07-13 - claim outbox workflow
