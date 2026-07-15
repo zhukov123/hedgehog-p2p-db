@@ -17,9 +17,9 @@
   - `docker compose -f observability/docker-compose.yml config --quiet`
   - `dotnet format Hedgehog.sln --verify-no-changes`
 - Container coverage: Docker is installed; the repo's current compose stack is observability-only, so this run validated the compose configuration and exercised multi-head/multi-storage-node behavior through local smoke, stress, and restore harnesses.
-- PR: pending.
-- Severus: configured-agent route unavailable (`agent not found: severus`); Discord handoff sent in `#agentchat` message `1526928748358930495`, no reply observed during implementation.
-- Next candidate task: implement another remaining SQLite workflow from `main`, likely `revoke_actor_or_node` or `evaluate_recovery_gate` after open PRs for those areas settle.
+- PR: https://github.com/zhukov123/hedgehog-p2p-db/pull/18
+- Severus: configured-agent route unavailable (`agent not found: severus`); Discord handoff sent in `#agentchat` message `1526928748358930495`. A later Severus sidecar report in messages `1526934014282301642`, `1526934014601068727`, and `1526934015788187799` reviewed existing PRs rather than this branch: leave revocation PR #16 out of merge path until it writes durable `outbox_events` rows and preserves revocation reasons in audit, select one canonical revocation PR between #13/#16, and scrutinize #17's default-on demo traffic behavior.
+- Next candidate task: resolve the duplicate revocation PR line by making the canonical revocation workflow durable-outbox-backed with persisted audit reason, or harden #17 by defaulting generated traffic off and adding lifecycle/concurrency coverage.
 
 ## 2026-07-13 - claim outbox workflow
 
