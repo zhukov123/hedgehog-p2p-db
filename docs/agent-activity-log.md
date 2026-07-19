@@ -22,7 +22,7 @@
   - `docker compose -f observability/docker-compose.yml config --quiet`
 - Container coverage: Docker is installed; the bundled observability compose file validates. The product still does not have a full multi-container database-node stack, so distributed runtime coverage remains the in-process multi-head/multi-storage smoke, stress, and restore drills.
 - Severus: direct `agentId: severus` session was unavailable and no visible Severus sessions were listed; sidecar request sent in Discord `#agentchat`, message `1528464414318264431`.
-- PR: pending.
+- PR: https://github.com/zhukov123/hedgehog-p2p-db/pull/20
 - Next candidate task: implement the remaining SQLite `accept_invite` workflow or design the recovery gate schema before `evaluate_recovery_gate`.
 
 ## 2026-07-13 - claim outbox workflow
