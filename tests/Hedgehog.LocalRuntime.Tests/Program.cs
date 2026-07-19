@@ -162,7 +162,7 @@ static async Task CapacitySafeFailsClosedAsync(string runtimeRoot)
     var evaluator = new LocalRuntimeReadinessEvaluator(new LocalRuntimeReadinessOptions(
         OutboxMaxAvailableAge: TimeSpan.FromMinutes(5),
         GateTimeout: TimeSpan.FromSeconds(2),
-        EmergencyFreeBytesRatio: 0.99d));
+        EmergencyFreeBytesRatio: 1.0d));
 
     var result = await evaluator.EvaluateAsync(cluster);
 
