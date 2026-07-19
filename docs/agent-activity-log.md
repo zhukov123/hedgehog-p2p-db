@@ -21,7 +21,7 @@
   - `dotnet format Hedgehog.sln --verify-no-changes`
 - Container coverage: `docker compose -f observability/docker-compose.yml config` passed; no full multi-container database stack exists on current `main`, so runtime coverage used local multi-head/multi-storage-node smoke, stress, and restore drills.
 - Severus: direct `sessions_send` failed with `agent not found: severus`; Discord handoff sent in `#agentchat` message `1528509292259442869`, auto-thread `1528509292259442869`. Severus emphasized one centrally computed fail-closed readiness answer, no dashboard-derived readiness, no second authority, and no production bypass.
-- PR: pending.
+- PR: https://github.com/zhukov123/hedgehog-p2p-db/pull/21
 - Next candidate task: add durable outbox insertion/assertions to the strongest actor/node revocation workflow before merging a revocation PR.
 
 ## 2026-07-13 - claim outbox workflow
