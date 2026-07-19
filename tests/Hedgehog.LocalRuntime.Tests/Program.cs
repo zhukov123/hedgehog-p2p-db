@@ -284,7 +284,7 @@ static async Task AuditWritableFailureIsUnknownAsync(string runtimeRoot)
         await AssertReadyAsync(client);
         await ExecuteSqlAsync(runtimeRoot, "DROP TABLE audit_events;");
 
-        await AssertNotReadyAsync(
+        await AssertGateNotReadyAsync(
             client,
             "audit_writable",
             LocalRuntimeReadinessGateStatus.Unknown,
@@ -371,13 +371,13 @@ static async Task AssertNotReadyAsync(
     HttpClient client,
     string failedGateLabel,
     (string Key, string Value) expectedDiagnostic) =>
-    await AssertNotReadyAsync(
+    await AssertGateNotReadyAsync(
         client,
         failedGateLabel,
         LocalRuntimeReadinessGateStatus.Failed,
         expectedDiagnostic);
 
-static async Task AssertNotReadyAsync(
+static async Task AssertGateNotReadyAsync(
     HttpClient client,
     string gateLabel,
     string expectedStatus,
