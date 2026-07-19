@@ -2,6 +2,7 @@ using System.Data;
 using System.Data.Common;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Hedgehog.Metadata.Core;
 using Hedgehog.Types;
 
@@ -1200,6 +1201,171 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
         }
     }
 
+    public async Task<SqliteWorkflowResult> EvaluateRecoveryGateAsync(
+        IDbConnection connection,
+        SqliteEvaluateRecoveryGateRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateEvaluateRecoveryGate(request);
+        var db = RequireDbConnection(connection);
+        await EnsureOpenAsync(db, cancellationToken).ConfigureAwait(false);
+        await using var transaction = await db.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            var replay = await TryBeginIdempotencyAsync(
+                db,
+                transaction,
+                request.IdempotencyKey,
+                tenantId: null,
+                datasetId: null,
+                MetadataWorkflowNames.EvaluateRecoveryGate,
+                request.ActorId,
+                request,
+                request.EvaluatedAt,
+                cancellationToken).ConfigureAwait(false);
+
+            if (replay)
+            {
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                return new SqliteWorkflowResult(MetadataWorkflowNames.EvaluateRecoveryGate, "replayed", Replayed: true, []);
+            }
+
+            var evaluatedAtMs = ToUnixMs(request.EvaluatedAt);
+            var state = request.IsOpen ? "open" : "closed";
+            var openedAtMs = request.IsOpen ? evaluatedAtMs : (long?)null;
+            var closedAtMs = request.IsOpen ? (long?)null : evaluatedAtMs;
+            var outboxTopic = request.IsOpen ? "recovery_gate.opened" : "recovery_gate.closed";
+
+            await ExecuteAsync(
+                db,
+                transaction,
+                """
+                INSERT INTO recovery_gates (
+                    gate_id,
+                    name,
+                    state,
+                    severity,
+                    reason,
+                    required_approvals,
+                    approvals,
+                    blocks_json,
+                    allowed_actions_json,
+                    opened_at_ms,
+                    closed_at_ms,
+                    evaluated_at_ms,
+                    updated_at_ms,
+                    idempotency_key
+                )
+                VALUES (
+                    @gate_id,
+                    @name,
+                    @state,
+                    @severity,
+                    @reason,
+                    @required_approvals,
+                    CASE WHEN @state = 'closed' THEN @required_approvals ELSE 0 END,
+                    @blocks_json,
+                    @allowed_actions_json,
+                    @opened_at_ms,
+                    @closed_at_ms,
+                    @evaluated_at_ms,
+                    @evaluated_at_ms,
+                    @idempotency_key
+                )
+                ON CONFLICT (gate_id) DO UPDATE SET
+                    name = excluded.name,
+                    state = excluded.state,
+                    severity = excluded.severity,
+                    reason = excluded.reason,
+                    required_approvals = excluded.required_approvals,
+                    approvals = CASE
+                        WHEN excluded.state = 'closed' THEN excluded.required_approvals
+                        ELSE MIN(recovery_gates.approvals, excluded.required_approvals)
+                    END,
+                    blocks_json = excluded.blocks_json,
+                    allowed_actions_json = excluded.allowed_actions_json,
+                    opened_at_ms = CASE
+                        WHEN excluded.state = 'open' AND recovery_gates.state = 'closed' THEN excluded.opened_at_ms
+                        ELSE COALESCE(recovery_gates.opened_at_ms, excluded.opened_at_ms)
+                    END,
+                    closed_at_ms = excluded.closed_at_ms,
+                    evaluated_at_ms = excluded.evaluated_at_ms,
+                    updated_at_ms = excluded.updated_at_ms,
+                    idempotency_key = excluded.idempotency_key;
+                """,
+                cancellationToken,
+                ("@gate_id", request.GateId),
+                ("@name", request.Name),
+                ("@state", state),
+                ("@severity", request.Severity),
+                ("@reason", request.Reason),
+                ("@required_approvals", request.RequiredApprovals),
+                ("@blocks_json", SerializeStringList(request.Blocks)),
+                ("@allowed_actions_json", SerializeStringList(request.AllowedActions)),
+                ("@opened_at_ms", openedAtMs),
+                ("@closed_at_ms", closedAtMs),
+                ("@evaluated_at_ms", evaluatedAtMs),
+                ("@idempotency_key", request.IdempotencyKey)).ConfigureAwait(false);
+
+            await ExecuteAsync(
+                db,
+                transaction,
+                """
+                INSERT INTO outbox_events (
+                    outbox_id,
+                    workflow,
+                    destination_node_id,
+                    topic,
+                    payload,
+                    idempotency_key,
+                    available_at_ms,
+                    created_at_ms
+                )
+                VALUES (
+                    @outbox_id,
+                    @workflow,
+                    NULL,
+                    @topic,
+                    @payload,
+                    @idempotency_key,
+                    @available_at_ms,
+                    @created_at_ms
+                );
+                """,
+                cancellationToken,
+                ("@outbox_id", $"recovery-gate-{request.IdempotencyKey}"),
+                ("@workflow", MetadataWorkflowNames.EvaluateRecoveryGate),
+                ("@topic", outboxTopic),
+                ("@payload", BuildRecoveryGatePayload(request, state)),
+                ("@idempotency_key", request.IdempotencyKey),
+                ("@available_at_ms", evaluatedAtMs),
+                ("@created_at_ms", evaluatedAtMs)).ConfigureAwait(false);
+
+            await AppendAuditAsync(
+                db,
+                transaction,
+                MetadataWorkflowNames.EvaluateRecoveryGate,
+                "allowed",
+                request.ActorId,
+                objectId: null,
+                versionId: null,
+                request.IdempotencyKey,
+                request.EvaluatedAt,
+                cancellationToken).ConfigureAwait(false);
+
+            await CompleteIdempotencyAsync(db, transaction, request.IdempotencyKey, request.EvaluatedAt, cancellationToken)
+                .ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return new SqliteWorkflowResult(MetadataWorkflowNames.EvaluateRecoveryGate, state, Replayed: false, [outboxTopic]);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
+    }
+
     private static async Task<IReadOnlyList<SqliteClaimedOutboxEvent>> ClaimOutboxRowsAsync(
         DbConnection connection,
         DbTransaction transaction,
@@ -1357,8 +1523,8 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
         string workflow,
         string decision,
         string? actorId,
-        string objectId,
-        string versionId,
+        string? objectId,
+        string? versionId,
         string idempotencyKey,
         DateTimeOffset occurredAt,
         CancellationToken cancellationToken) =>
@@ -1507,6 +1673,18 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
     private static byte[] HashRequest(object request) =>
         SHA256.HashData(Encoding.UTF8.GetBytes(request.ToString() ?? string.Empty));
 
+    private static string SerializeStringList(IReadOnlyList<string> values) =>
+        JsonSerializer.Serialize(values);
+
+    private static byte[] BuildRecoveryGatePayload(SqliteEvaluateRecoveryGateRequest request, string state) =>
+        Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new
+        {
+            gate_id = request.GateId,
+            state,
+            severity = request.Severity,
+            evaluated_at_ms = ToUnixMs(request.EvaluatedAt),
+        }));
+
     private static void ValidateCreateWriteIntent(SqliteCreateWriteIntentRequest request)
     {
         RequireText(request.TenantId, nameof(request.TenantId));
@@ -1633,6 +1811,39 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
         if (request.Topic is not null)
         {
             RequireText(request.Topic, nameof(request.Topic));
+        }
+    }
+
+    private static void ValidateEvaluateRecoveryGate(SqliteEvaluateRecoveryGateRequest request)
+    {
+        RequireText(request.GateId, nameof(request.GateId));
+        RequireText(request.Name, nameof(request.Name));
+        RequireText(request.Severity, nameof(request.Severity));
+        RequireText(request.Reason, nameof(request.Reason));
+        RequirePositive(request.RequiredApprovals, nameof(request.RequiredApprovals));
+        RequireText(request.IdempotencyKey, nameof(request.IdempotencyKey));
+        RequireOneOf(request.Severity, nameof(request.Severity), "info", "warning", "critical");
+        RequireStringItems(request.Blocks, nameof(request.Blocks));
+        RequireStringItems(request.AllowedActions, nameof(request.AllowedActions));
+        if (request.ActorId is not null)
+        {
+            RequireText(request.ActorId, nameof(request.ActorId));
+        }
+    }
+
+    private static void RequireOneOf(string value, string name, params string[] allowed)
+    {
+        if (!allowed.Any(item => string.Equals(item, value, StringComparison.Ordinal)))
+        {
+            throw new ArgumentOutOfRangeException(name, value, $"{name} must be one of: {string.Join(", ", allowed)}.");
+        }
+    }
+
+    private static void RequireStringItems(IReadOnlyList<string> values, string name)
+    {
+        foreach (var value in values)
+        {
+            RequireText(value, name);
         }
     }
 

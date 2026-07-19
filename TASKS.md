@@ -81,10 +81,11 @@ Admin is not a later dashboard. For v1, admin status, repair visibility, audit r
   - [ ] accept invite
   - [ ] revoke actor or node
   - [x] claim outbox
-  - [ ] evaluate recovery gate
+  - [x] evaluate recovery gate
 - [ ] Add invariant queries and repair-readiness checks.
   - [x] Guard capacity reports against unknown pressure labels, impossible byte accounting, and missing nodes.
   - [x] Guard reservation expiry against premature expiry before the reservation TTL.
+  - [x] Add local runtime readiness gates for schema parity, metadata integrity, outbox reconciliation, audit appendability, storage consistency, and emergency capacity pressure.
 
 ## Milestone 4: Head Service
 
@@ -129,6 +130,7 @@ Admin is not a later dashboard. For v1, admin status, repair visibility, audit r
 - [x] Run multiple heads and three storage agents locally in the smoke runtime.
 - [x] Add smoke scenario: create tenant, create dataset, register nodes, upload object, commit replicas, retrieve from another client, and delete.
 - [x] Expose curlable local runtime API for tenant registration, object writes, reads, deletes, and status.
+- [x] Expose fail-closed local readiness probes and Prometheus gate metrics from one evaluator.
 
 ## Milestone 9: Tests And Release Gate
 
