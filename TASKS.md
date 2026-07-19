@@ -79,7 +79,7 @@ Admin is not a later dashboard. For v1, admin status, repair visibility, audit r
   - [x] cleanup conversion
   - [x] capacity report
   - [ ] accept invite
-  - [ ] revoke actor or node
+  - [x] revoke actor or node
   - [x] claim outbox
   - [ ] evaluate recovery gate
 - [ ] Add invariant queries and repair-readiness checks.
@@ -140,6 +140,7 @@ Admin is not a later dashboard. For v1, admin status, repair visibility, audit r
 - [x] Add SQLite integration tests for create write intent, complete replica, commit version, delete marker, lease repair, expire reservation, cleanup conversion, and capacity report.
 - [ ] Add SQLite integration tests for remaining workflows.
   - [x] Claim outbox worker leasing, destination filtering, unexpired lease exclusion, and expired lease reclaim are covered in `Hedgehog.Metadata.Sqlite.Tests`.
+  - [x] Revoke actor or node covers actor revocation, invitation invalidation, node key revocation, suspect replica conversion, affected-version under-replication, durable outbox claiming, audit rows, replay, and invalid target validation in `Hedgehog.Metadata.Sqlite.Tests`.
 - [ ] Add storage-agent crash tests.
 - [x] Add admin repository contract tests.
 - [x] Add admin endpoint contract tests.
