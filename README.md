@@ -158,7 +158,7 @@ curl -fsS http://localhost:5090/health/ready
 curl -fsS http://localhost:5090/health/cluster
 ```
 
-`/health/ready` returns HTTP 200 only when metadata is queryable and all in-process heads and storage nodes are running. `/health/cluster` returns the same readiness contract with counts for tenants, heads, storage nodes, metadata availability, and the runtime paths.
+`/health/ready` returns HTTP 200 only when the local readiness evaluator passes every gate; otherwise it fails closed with HTTP 503. `/health/cluster` always returns the same versioned readiness contract for dashboards and diagnostics. The current evaluator checks schema migration parity, SQLite foreign-key integrity, pending or expired outbox work, audit appendability with rollback, healthy replica blob/manifests, and emergency capacity pressure. `/metrics` exports the same gate result as `hedgehog_runtime_readiness_gate_status{label,status}` so Prometheus, health probes, and the admin surface do not compute separate readiness answers.
 
 ## Grafana Dashboard
 

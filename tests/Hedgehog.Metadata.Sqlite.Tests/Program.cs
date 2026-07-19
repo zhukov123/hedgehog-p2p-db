@@ -8,7 +8,7 @@ await connection.OpenAsync();
 var runner = SqliteMetadataAuthority.CreateMigrationRunner();
 await runner.ApplyMigrationsAsync(connection);
 
-Equal(6, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM __hedgehog_schema_migrations;"));
+Equal(7, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM __hedgehog_schema_migrations;"));
 Equal(Labels.AllGroups.SelectMany(group => group).Count(), await ScalarIntAsync(connection, "SELECT COUNT(*) FROM labels;"));
 Equal(13, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM workflow_definitions;"));
 Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM metadata_store WHERE store_id = 'default';"));
@@ -17,18 +17,21 @@ await AssertTableHasColumnsAsync(connection, "objects", "tenant_id", "dataset_id
 await AssertTableHasColumnsAsync(connection, "object_versions", "placement_epoch", "delete_epoch", "required_replica_count");
 await AssertTableHasColumnsAsync(connection, "replicas", "fencing_token", "placement_epoch", "delete_epoch");
 await AssertTableHasColumnsAsync(connection, "capacity_reservations", "reservation_class", "fencing_token", "bytes_reserved");
+await AssertTableHasColumnsAsync(connection, "recovery_gates", "gate_id", "state", "severity", "required_approvals", "approvals");
 await AssertForeignKeyCheckCleanAsync(connection);
 
 await runner.ApplyMigrationsAsync(connection);
-Equal(6, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM __hedgehog_schema_migrations;"));
+Equal(7, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM __hedgehog_schema_migrations;"));
 
 await SeedAuthorityAsync(connection);
 await WriteLifecyclePersistsCoherentMetadataAsync(connection);
 await DeleteMarkerPersistsTombstoneAsync(connection);
 await RemainingWorkflowSetPersistsCoherentMetadataAsync(connection);
 await ClaimOutboxClaimsEligibleEventsAsync(connection);
+await EvaluateRecoveryGatePersistsAuditableStateAsync(connection);
 await CapacityReportRejectsInvalidAccountingAsync(connection);
 await ExpireReservationRejectsEarlyExpiryAsync(connection);
+await EvaluateRecoveryGateRejectsUnknownSeverityAsync(connection);
 await AssertForeignKeyCheckCleanAsync(connection);
 
 Console.WriteLine("Hedgehog.Metadata.Sqlite.Tests passed.");
@@ -460,6 +463,87 @@ static async Task ClaimOutboxClaimsEligibleEventsAsync(SqliteConnection connecti
     Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM outbox_events WHERE outbox_id = 'outbox-unexpired' AND claimed_by = 'node-a';"));
 }
 
+static async Task EvaluateRecoveryGatePersistsAuditableStateAsync(SqliteConnection connection)
+{
+    var workflowStore = SqliteMetadataAuthority.CreateWorkflowStore();
+    var now = new DateTimeOffset(2026, 1, 2, 6, 45, 0, TimeSpan.Zero);
+
+    var opened = await workflowStore.EvaluateRecoveryGateAsync(
+        connection,
+        new SqliteEvaluateRecoveryGateRequest(
+            "gate-capacity-emergency",
+            "Emergency capacity reserve",
+            "critical",
+            "node-a is below emergency reserve",
+            RequiredApprovals: 2,
+            Blocks: ["ordinary writes", "low-priority repair"],
+            AllowedActions: ["delete", "gc", "critical repair"],
+            IsOpen: true,
+            now,
+            "idem-recovery-gate-open",
+            ActorId: "actor-a"));
+
+    Equal("open", opened.State);
+    Equal("recovery_gate.opened", opened.OutboxTopics.Single());
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM recovery_gates WHERE gate_id = 'gate-capacity-emergency' AND state = 'open' AND severity = 'critical' AND required_approvals = 2 AND approvals = 0;"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM recovery_gates WHERE gate_id = 'gate-capacity-emergency' AND blocks_json LIKE '%ordinary writes%' AND allowed_actions_json LIKE '%critical repair%';"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM audit_events WHERE workflow = 'evaluate_recovery_gate' AND actor_id = 'actor-a' AND idempotency_key = 'idem-recovery-gate-open';"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM outbox_events WHERE workflow = 'evaluate_recovery_gate' AND topic = 'recovery_gate.opened' AND idempotency_key = 'idem-recovery-gate-open';"));
+
+    var replay = await workflowStore.EvaluateRecoveryGateAsync(
+        connection,
+        new SqliteEvaluateRecoveryGateRequest(
+            "gate-capacity-emergency",
+            "Emergency capacity reserve",
+            "critical",
+            "node-a is below emergency reserve",
+            RequiredApprovals: 2,
+            Blocks: ["ordinary writes", "low-priority repair"],
+            AllowedActions: ["delete", "gc", "critical repair"],
+            IsOpen: true,
+            now,
+            "idem-recovery-gate-open",
+            ActorId: "actor-a"));
+
+    Equal(true, replay.Replayed);
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM audit_events WHERE workflow = 'evaluate_recovery_gate' AND idempotency_key = 'idem-recovery-gate-open';"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM outbox_events WHERE workflow = 'evaluate_recovery_gate' AND idempotency_key = 'idem-recovery-gate-open';"));
+
+    var closed = await workflowStore.EvaluateRecoveryGateAsync(
+        connection,
+        new SqliteEvaluateRecoveryGateRequest(
+            "gate-capacity-emergency",
+            "Emergency capacity reserve",
+            "critical",
+            "capacity returned above emergency reserve",
+            RequiredApprovals: 2,
+            Blocks: [],
+            AllowedActions: ["audit export"],
+            IsOpen: false,
+            now.AddMinutes(5),
+            "idem-recovery-gate-close",
+            ActorId: "actor-a"));
+
+    Equal("closed", closed.State);
+    Equal("recovery_gate.closed", closed.OutboxTopics.Single());
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM recovery_gates WHERE gate_id = 'gate-capacity-emergency' AND state = 'closed' AND approvals = 2 AND closed_at_ms IS NOT NULL;"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM idempotency_records WHERE idempotency_key = 'idem-recovery-gate-close' AND result_state = 'completed';"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM outbox_events WHERE workflow = 'evaluate_recovery_gate' AND topic = 'recovery_gate.closed' AND idempotency_key = 'idem-recovery-gate-close';"));
+
+    var claim = await workflowStore.ClaimOutboxAsync(
+        connection,
+        new SqliteClaimOutboxRequest(
+            "recovery-worker-a",
+            now.AddMinutes(6),
+            TimeSpan.FromMinutes(2),
+            MaxItems: 10,
+            Topic: "recovery_gate.closed"));
+
+    Equal("claimed", claim.WorkflowResult.State);
+    Equal(1, claim.Events.Count);
+    Equal("recovery_gate.closed", claim.Events[0].Topic);
+}
+
 static async Task ExpireReservationRejectsEarlyExpiryAsync(SqliteConnection connection)
 {
     var workflowStore = SqliteMetadataAuthority.CreateWorkflowStore();
@@ -503,6 +587,29 @@ static async Task ExpireReservationRejectsEarlyExpiryAsync(SqliteConnection conn
 
     Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM capacity_reservations WHERE reservation_id = 'reservation-d' AND state = 'reserved';"));
     Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM replicas WHERE replica_id = 'replica-d' AND state = 'planned';"));
+}
+
+static async Task EvaluateRecoveryGateRejectsUnknownSeverityAsync(SqliteConnection connection)
+{
+    var workflowStore = SqliteMetadataAuthority.CreateWorkflowStore();
+    var now = new DateTimeOffset(2026, 1, 2, 7, 30, 0, TimeSpan.Zero);
+
+    await ThrowsAsync<ArgumentOutOfRangeException>(() => workflowStore.EvaluateRecoveryGateAsync(
+        connection,
+        new SqliteEvaluateRecoveryGateRequest(
+            "gate-invalid",
+            "Invalid gate",
+            "emergency",
+            "unsupported severity should fail before persistence",
+            RequiredApprovals: 1,
+            Blocks: ["writes"],
+            AllowedActions: ["audit export"],
+            IsOpen: true,
+            now,
+            "idem-recovery-gate-invalid",
+            ActorId: "actor-a")));
+
+    Equal(0, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM recovery_gates WHERE gate_id = 'gate-invalid';"));
 }
 
 static async Task<int> ScalarIntAsync(SqliteConnection connection, string sql)

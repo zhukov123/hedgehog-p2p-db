@@ -38,7 +38,8 @@ internal sealed class LocalRuntimeMetrics
 
     public string RenderPrometheus(
         LocalClusterSnapshot snapshot,
-        IReadOnlyDictionary<string, long> metadataCounts)
+        IReadOnlyDictionary<string, long> metadataCounts,
+        LocalRuntimeReadinessResult readiness)
     {
         var builder = new StringBuilder();
         builder.AppendLine("# HELP hedgehog_runtime_operations_total Total local runtime API operations.");
@@ -100,6 +101,22 @@ internal sealed class LocalRuntimeMetrics
         foreach (var (table, count) in metadataCounts.OrderBy(item => item.Key, StringComparer.Ordinal))
         {
             builder.AppendLine($"hedgehog_runtime_metadata_rows{{table=\"{Escape(table)}\"}} {count}");
+        }
+
+        builder.AppendLine("# HELP hedgehog_runtime_readiness_gate_status Current readiness gate status from the runtime evaluator.");
+        builder.AppendLine("# TYPE hedgehog_runtime_readiness_gate_status gauge");
+        foreach (var gate in readiness.Gates.OrderBy(gate => gate.Label, StringComparer.Ordinal))
+        {
+            foreach (var status in new[]
+            {
+                LocalRuntimeReadinessGateStatus.Passed,
+                LocalRuntimeReadinessGateStatus.Failed,
+                LocalRuntimeReadinessGateStatus.Unknown,
+            })
+            {
+                var value = gate.Status == status ? 1 : 0;
+                builder.AppendLine($"hedgehog_runtime_readiness_gate_status{{label=\"{Escape(gate.Label)}\",status=\"{Escape(status)}\"}} {value}");
+            }
         }
 
         return builder.ToString();
