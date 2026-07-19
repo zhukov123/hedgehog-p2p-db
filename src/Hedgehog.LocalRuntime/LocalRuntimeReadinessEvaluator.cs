@@ -250,7 +250,8 @@ public sealed class LocalRuntimeReadinessEvaluator
             SELECT MIN(available_at_ms)
             FROM outbox_events
             WHERE delivered_at_ms IS NULL
-              AND available_at_ms <= @now_ms;
+              AND available_at_ms <= @now_ms
+              AND (claimed_until_ms IS NULL OR claimed_until_ms <= @now_ms);
             """,
             cancellationToken,
             ("@now_ms", nowMs)).ConfigureAwait(false);

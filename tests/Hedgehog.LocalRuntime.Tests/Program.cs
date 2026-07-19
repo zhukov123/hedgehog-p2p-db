@@ -22,6 +22,7 @@ try
     await MultiTenantIsolationAndDeleteAsync(Path.Combine(runtimeRoot, "isolation"));
     await StressScenarioAsync(Path.Combine(runtimeRoot, "stress"));
     await RestoreDrillAsync(Path.Combine(runtimeRoot, "restore"));
+    await CapacitySafeFailsClosedAsync(Path.Combine(runtimeRoot, "capacity-safe"));
     await ReadinessTimeoutFailsClosedAsync(Path.Combine(runtimeRoot, "readiness-timeout"));
     await RuntimeApiHealthEndpointsAsync(Path.Combine(runtimeRoot, "api-health"));
 
@@ -145,8 +146,30 @@ static async Task RuntimeApiHealthEndpointsAsync(string runtimeRoot)
 
     await ExpiredOutboxClaimFailsReadinessAsync(Path.Combine(runtimeRoot, "expired-claim"));
     await StalePendingOutboxFailsReadinessAsync(Path.Combine(runtimeRoot, "stale-outbox"));
+    await ActiveOutboxLeaseDoesNotFailReadinessAsync(Path.Combine(runtimeRoot, "active-outbox-lease"));
     await MetadataIntegrityFailureFailsReadinessAsync(Path.Combine(runtimeRoot, "metadata-integrity"));
+    await AuditWritableFailureIsUnknownAsync(Path.Combine(runtimeRoot, "audit-writable"));
+    await HttpReadinessTimeoutFailsClosedAsync(Path.Combine(runtimeRoot, "http-timeout"));
     await MissingReplicaBlobFailsReadinessAsync(Path.Combine(runtimeRoot, "missing-replica"));
+}
+
+static async Task CapacitySafeFailsClosedAsync(string runtimeRoot)
+{
+    await using var cluster = new LocalCluster(LocalClusterOptions.CreateDefault(runtimeRoot));
+    await cluster.StartAsync();
+    var writer = cluster.CreateClient("capacity-writer");
+    await writer.PutTextAsync("capacity-pressure.txt", "pressure");
+    var evaluator = new LocalRuntimeReadinessEvaluator(new LocalRuntimeReadinessOptions(
+        OutboxMaxAvailableAge: TimeSpan.FromMinutes(5),
+        GateTimeout: TimeSpan.FromSeconds(2),
+        EmergencyFreeBytesRatio: 0.99d));
+
+    var result = await evaluator.EvaluateAsync(cluster);
+
+    Equal(false, result.Ready);
+    var gate = result.Gates.Single(gate => gate.Label == "capacity_safe");
+    Equal(LocalRuntimeReadinessGateStatus.Failed, gate.Status);
+    Equal("3", gate.Diagnostics["emergency_pressure_count"]);
 }
 
 static async Task ReadinessTimeoutFailsClosedAsync(string runtimeRoot)
@@ -197,6 +220,27 @@ static async Task StalePendingOutboxFailsReadinessAsync(string runtimeRoot)
     });
 }
 
+static async Task ActiveOutboxLeaseDoesNotFailReadinessAsync(string runtimeRoot)
+{
+    await WithRuntimeApiAsync(runtimeRoot, async client =>
+    {
+        await AssertReadyAsync(client);
+        await SeedOutboxAsync(
+            runtimeRoot,
+            "active-lease-outbox",
+            availableAtMs: DateTimeOffset.UtcNow.AddMinutes(-10).ToUnixTimeMilliseconds(),
+            claimedBy: "readiness-test",
+            claimedUntilMs: DateTimeOffset.UtcNow.AddMinutes(10).ToUnixTimeMilliseconds());
+
+        var cluster = await client.GetFromJsonAsync<HealthClusterDto>("/health/cluster")
+            ?? throw new InvalidOperationException("cluster health endpoint returned no payload");
+        Equal(true, cluster.Ready);
+        var gate = cluster.Gates.Single(gate => gate.Label == "outbox_reconciled");
+        Equal(LocalRuntimeReadinessGateStatus.Passed, gate.Status);
+        Equal("0", gate.Diagnostics["oldest_available_age_ms"]);
+    });
+}
+
 static async Task MetadataIntegrityFailureFailsReadinessAsync(string runtimeRoot)
 {
     await WithRuntimeApiAsync(runtimeRoot, async client =>
@@ -233,6 +277,39 @@ static async Task MetadataIntegrityFailureFailsReadinessAsync(string runtimeRoot
     });
 }
 
+static async Task AuditWritableFailureIsUnknownAsync(string runtimeRoot)
+{
+    await WithRuntimeApiAsync(runtimeRoot, async client =>
+    {
+        await AssertReadyAsync(client);
+        await ExecuteSqlAsync(runtimeRoot, "DROP TABLE audit_events;");
+
+        await AssertNotReadyAsync(
+            client,
+            "audit_writable",
+            LocalRuntimeReadinessGateStatus.Unknown,
+            ("reason", "probe_error"));
+    });
+}
+
+static async Task HttpReadinessTimeoutFailsClosedAsync(string runtimeRoot)
+{
+    await WithRuntimeApiAsync(
+        runtimeRoot,
+        async client =>
+        {
+            var readyResponse = await client.GetAsync("/health/ready");
+            Equal(HttpStatusCode.ServiceUnavailable, readyResponse.StatusCode);
+
+            var cluster = await client.GetFromJsonAsync<HealthClusterDto>("/health/cluster")
+                ?? throw new InvalidOperationException("cluster health endpoint returned no payload");
+            Equal(false, cluster.Ready);
+            Equal(true, cluster.Gates.All(gate => gate.Status == LocalRuntimeReadinessGateStatus.Unknown));
+            Equal(true, cluster.Gates.All(gate => gate.Diagnostics["reason"] == "timeout"));
+        },
+        ("readiness:gate-timeout-ms", "0"));
+}
+
 static async Task MissingReplicaBlobFailsReadinessAsync(string runtimeRoot)
 {
     await WithRuntimeApiAsync(runtimeRoot, async client =>
@@ -258,7 +335,10 @@ static async Task MissingReplicaBlobFailsReadinessAsync(string runtimeRoot)
     });
 }
 
-static async Task WithRuntimeApiAsync(string runtimeRoot, Func<HttpClient, Task> action)
+static async Task WithRuntimeApiAsync(
+    string runtimeRoot,
+    Func<HttpClient, Task> action,
+    params (string Key, string Value)[] settings)
 {
     var contentRoot = Path.Combine(FindRepoRoot(), "src", "Hedgehog.LocalRuntime.Api");
     await using var app = new WebApplicationFactory<LocalRuntimeApiAssemblyMarker>()
@@ -268,6 +348,10 @@ static async Task WithRuntimeApiAsync(string runtimeRoot, Func<HttpClient, Task>
             builder.UseSetting("runtime-root", runtimeRoot);
             builder.UseSetting("reset-runtime", "true");
             builder.UseSetting("readiness:outbox-max-age-ms", "300000");
+            foreach (var (key, value) in settings)
+            {
+                builder.UseSetting(key, value);
+            }
         });
     using var client = app.CreateClient();
     await action(client);
@@ -286,6 +370,17 @@ static async Task AssertReadyAsync(HttpClient client)
 static async Task AssertNotReadyAsync(
     HttpClient client,
     string failedGateLabel,
+    (string Key, string Value) expectedDiagnostic) =>
+    await AssertNotReadyAsync(
+        client,
+        failedGateLabel,
+        LocalRuntimeReadinessGateStatus.Failed,
+        expectedDiagnostic);
+
+static async Task AssertNotReadyAsync(
+    HttpClient client,
+    string gateLabel,
+    string expectedStatus,
     (string Key, string Value) expectedDiagnostic)
 {
     var readyResponse = await client.GetAsync("/health/ready");
@@ -294,8 +389,8 @@ static async Task AssertNotReadyAsync(
     var cluster = await client.GetFromJsonAsync<HealthClusterDto>("/health/cluster")
         ?? throw new InvalidOperationException("cluster health endpoint returned no payload");
     Equal(false, cluster.Ready);
-    var gate = cluster.Gates.Single(gate => gate.Label == failedGateLabel);
-    Equal(LocalRuntimeReadinessGateStatus.Failed, gate.Status);
+    var gate = cluster.Gates.Single(gate => gate.Label == gateLabel);
+    Equal(expectedStatus, gate.Status);
     Equal(expectedDiagnostic.Value, gate.Diagnostics[expectedDiagnostic.Key]);
     True(cluster.Gates.Count >= 6, "cluster health should include individual gate diagnostics when not ready");
 }
