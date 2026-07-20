@@ -141,6 +141,12 @@ Revocation:
 6. Propagate via metadata store polling/watch plus outbox event.
 7. Head nodes cache revocation state only with a very short TTL.
 
+Current SQLite v1-alpha workflow:
+- `revoke_actor_or_node` requires an active `admin` or `system` actor in the tenant.
+- Actor revocation rejects self-revocation, marks the actor `revoked`, timestamps `revoked_at_ms`, revokes active invitations created by or accepted by that actor, writes audit, and emits `security.actor_revoked`.
+- Node revocation marks joining, active, draining, or quarantined nodes `revoked`, revokes active node keys, fences issued leases held by the node, aborts in-flight reservations, marks planned/streaming/verifying/healthy replicas on that node `suspect`, writes audit, and emits `security.node_revoked`.
+- Replays use the workflow idempotency record and do not duplicate outbox or audit rows.
+
 ## Metadata Privacy
 
 Assume metadata is sensitive even when object bytes are encrypted.

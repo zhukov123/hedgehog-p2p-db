@@ -26,6 +26,7 @@ await SeedAuthorityAsync(connection);
 await WriteLifecyclePersistsCoherentMetadataAsync(connection);
 await DeleteMarkerPersistsTombstoneAsync(connection);
 await RemainingWorkflowSetPersistsCoherentMetadataAsync(connection);
+await RevokeActorOrNodePersistsSecurityStateAsync(connection);
 await ClaimOutboxClaimsEligibleEventsAsync(connection);
 await CapacityReportRejectsInvalidAccountingAsync(connection);
 await ExpireReservationRejectsEarlyExpiryAsync(connection);
@@ -64,7 +65,9 @@ static async Task SeedAuthorityAsync(SqliteConnection connection)
             state,
             created_at_ms
         )
-        VALUES ('actor-a', 'tenant-a', 'Actor A', 'admin', 'fingerprint-a', 'active', @now_ms);
+        VALUES
+            ('actor-a', 'tenant-a', 'Actor A', 'admin', 'fingerprint-a', 'active', @now_ms),
+            ('actor-b', 'tenant-a', 'Actor B', 'user', 'fingerprint-b', 'active', @now_ms);
 
         INSERT INTO nodes (
             node_id,
@@ -81,6 +84,22 @@ static async Task SeedAuthorityAsync(SqliteConnection connection)
         VALUES
             ('node-a', 'tenant-a', 'Node A', 'active', 1000000, 0, 0, 1000000, @now_ms, @now_ms),
             ('node-b', 'tenant-a', 'Node B', 'active', 1000000, 0, 0, 1000000, @now_ms, @now_ms);
+
+        INSERT INTO node_keys (node_key_id, node_id, key_id, public_key_fingerprint, state, created_at_ms)
+        VALUES ('node-key-b', 'node-b', 'node-key-id-b', 'node-fingerprint-b', 'active', @now_ms);
+
+        INSERT INTO invitations (
+            invitation_id,
+            tenant_id,
+            created_by_actor_id,
+            accepted_by_actor_id,
+            state,
+            invitee_hint,
+            token_hash,
+            encrypted_payload,
+            created_at_ms
+        )
+        VALUES ('invite-actor-b', 'tenant-a', 'actor-a', 'actor-b', 'active', 'actor-b', X'1011', X'1213', @now_ms);
         """,
         ("@now_ms", now));
 }
@@ -333,6 +352,84 @@ static async Task RemainingWorkflowSetPersistsCoherentMetadataAsync(SqliteConnec
     Equal("failed_cleanup_required", cleanup.State);
     Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM capacity_reservations WHERE reservation_id = 'reservation-c' AND state = 'failed_cleanup_required';"));
     Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM replicas WHERE replica_id = 'replica-c' AND state = 'delete_pending';"));
+}
+
+static async Task RevokeActorOrNodePersistsSecurityStateAsync(SqliteConnection connection)
+{
+    var workflowStore = SqliteMetadataAuthority.CreateWorkflowStore();
+    var now = new DateTimeOffset(2026, 1, 2, 5, 30, 0, TimeSpan.Zero);
+
+    await ThrowsAsync<InvalidOperationException>(() => workflowStore.RevokeActorOrNodeAsync(
+        connection,
+        new SqliteRevokeActorOrNodeRequest(
+            "tenant-a",
+            "node",
+            "node-a",
+            "actor-b",
+            now,
+            "user actor cannot revoke nodes",
+            "idem-revoke-node-a-denied")));
+
+    await ThrowsAsync<InvalidOperationException>(() => workflowStore.RevokeActorOrNodeAsync(
+        connection,
+        new SqliteRevokeActorOrNodeRequest(
+            "tenant-a",
+            "actor",
+            "actor-a",
+            "actor-a",
+            now.AddSeconds(1),
+            "self revoke should be blocked",
+            "idem-revoke-self-denied")));
+
+    var actorRevoke = await workflowStore.RevokeActorOrNodeAsync(
+        connection,
+        new SqliteRevokeActorOrNodeRequest(
+            "tenant-a",
+            "actor",
+            "actor-b",
+            "actor-a",
+            now.AddSeconds(2),
+            "operator offboarding",
+            "idem-revoke-actor-b"));
+
+    Equal("revoked", actorRevoke.State);
+    Equal("security.actor_revoked", actorRevoke.OutboxTopics.Single());
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM actors WHERE actor_id = 'actor-b' AND state = 'revoked' AND revoked_at_ms IS NOT NULL;"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM invitations WHERE invitation_id = 'invite-actor-b' AND state = 'revoked' AND revoked_at_ms IS NOT NULL;"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM outbox_events WHERE workflow = 'revoke_actor_or_node' AND topic = 'security.actor_revoked' AND idempotency_key = 'idem-revoke-actor-b';"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM audit_events WHERE workflow = 'revoke_actor_or_node' AND actor_id = 'actor-a' AND correlation_id = 'actor:actor-b';"));
+
+    var actorReplay = await workflowStore.RevokeActorOrNodeAsync(
+        connection,
+        new SqliteRevokeActorOrNodeRequest(
+            "tenant-a",
+            "actor",
+            "actor-b",
+            "actor-a",
+            now.AddSeconds(2),
+            "operator offboarding",
+            "idem-revoke-actor-b"));
+    Equal(true, actorReplay.Replayed);
+
+    var nodeRevoke = await workflowStore.RevokeActorOrNodeAsync(
+        connection,
+        new SqliteRevokeActorOrNodeRequest(
+            "tenant-a",
+            "node",
+            "node-b",
+            "actor-a",
+            now.AddSeconds(3),
+            "compromised node key",
+            "idem-revoke-node-b"));
+
+    Equal("revoked", nodeRevoke.State);
+    Equal("security.node_revoked", nodeRevoke.OutboxTopics.Single());
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM nodes WHERE node_id = 'node-b' AND state = 'revoked';"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM node_keys WHERE node_id = 'node-b' AND state = 'revoked' AND revoked_at_ms IS NOT NULL;"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM leases WHERE lease_id = 'repair-lease-a' AND state = 'fenced';"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM replicas WHERE replica_id = 'replica-b' AND state = 'suspect';"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM outbox_events WHERE workflow = 'revoke_actor_or_node' AND destination_node_id = 'node-b' AND topic = 'security.node_revoked';"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM audit_events WHERE workflow = 'revoke_actor_or_node' AND node_id = 'node-b' AND correlation_id = 'node:node-b';"));
 }
 
 static async Task CapacityReportRejectsInvalidAccountingAsync(SqliteConnection connection)
