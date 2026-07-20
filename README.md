@@ -160,6 +160,32 @@ curl -fsS http://localhost:5090/health/cluster
 
 `/health/ready` returns HTTP 200 only when metadata is queryable and all in-process heads and storage nodes are running. `/health/cluster` returns the same readiness contract with counts for tenants, heads, storage nodes, metadata availability, and the runtime paths.
 
+## Live Demo Runtime
+
+The local runtime API also exposes an owner-readable browser endpoint at `http://localhost:5090/demo`. It renders live cluster state from the running two-head, three-storage-node runtime plus recent synthetic write/read/delete activity.
+
+Start it with low-volume generated traffic:
+
+```text
+HEDGEHOG_RUNTIME_ROOT="$(pwd)/.hedgehog/demo-runtime" HEDGEHOG_RUNTIME_RESET=true \
+HEDGEHOG_DEMO_TRAFFIC_ENABLED=true HEDGEHOG_DEMO_TRAFFIC_INTERVAL_SECONDS=30 \
+  dotnet run --project src/Hedgehog.LocalRuntime.Api --urls http://localhost:5090
+```
+
+Operator checks:
+
+```text
+curl -fsS http://localhost:5090/demo
+curl -fsS http://localhost:5090/runtime/demo/status
+curl -fsS -X POST http://localhost:5090/runtime/demo/tick
+curl -fsS http://localhost:5090/health/ready
+curl -fsS http://localhost:5090/metrics
+```
+
+Restart by stopping the process and running the same command with `HEDGEHOG_RUNTIME_RESET=false` or without the reset variable to keep the runtime directory. Use `HEDGEHOG_RUNTIME_RESET=true` when you intentionally want a clean demo. Logs are emitted to the console running `dotnet run`; teardown is stopping the process and removing `.hedgehog/demo-runtime` when the data is no longer needed.
+
+The generated traffic runner is disabled by default for test and development predictability. When enabled, it writes a synthetic object, reads it through the opposite head order, deletes it, records success/failure counters, and keeps recent failures visible at `/runtime/demo/status`.
+
 ## Grafana Dashboard
 
 Start the local runtime API, then start Prometheus and Grafana:

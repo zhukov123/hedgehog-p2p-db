@@ -28,6 +28,8 @@ await cluster.StartAsync();
 
 builder.Services.AddSingleton<LocalRuntimeMetrics>();
 builder.Services.AddSingleton(cluster);
+builder.Services.AddSingleton<DemoTrafficRunner>();
+builder.Services.AddHostedService(provider => provider.GetRequiredService<DemoTrafficRunner>());
 
 var app = builder.Build();
 app.UseCors();
@@ -37,7 +39,92 @@ app.Lifetime.ApplicationStopping.Register(() =>
     cluster.DisposeAsync().AsTask().GetAwaiter().GetResult();
 });
 
-app.MapGet("/", () => Results.Redirect("/runtime/status"));
+app.MapGet("/", () => Results.Redirect("/demo"));
+
+app.MapGet("/demo", () => Results.Content(
+    """
+    <!doctype html>
+    <html lang="en">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>Hedgehog Demo Runtime</title>
+      <style>
+        :root { color-scheme: light; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif; background: #f7f8fb; color: #1c2634; }
+        body { margin: 0; }
+        main { max-width: 1120px; margin: 0 auto; padding: 24px; }
+        h1 { font-size: 28px; margin: 0 0 4px; letter-spacing: 0; }
+        h2 { font-size: 16px; margin: 0 0 12px; }
+        .top { display: flex; justify-content: space-between; gap: 16px; align-items: end; margin-bottom: 20px; }
+        .muted { color: #5c6878; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+        .card { background: #fff; border: 1px solid #dbe1ea; border-radius: 8px; padding: 14px; box-shadow: 0 1px 2px rgba(30, 42, 56, .06); }
+        .value { font-size: 24px; font-weight: 700; margin-top: 4px; }
+        .status { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 999px; background: #e9f7ef; color: #116233; font-weight: 650; }
+        .status.off { background: #fff6de; color: #7a5200; }
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        th, td { text-align: left; padding: 9px 8px; border-bottom: 1px solid #e5eaf1; vertical-align: top; }
+        th { color: #536071; font-size: 12px; text-transform: uppercase; }
+        code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+        .section { margin-top: 18px; }
+        .error { color: #9b2226; }
+      </style>
+    </head>
+    <body>
+      <main>
+        <div class="top">
+          <div>
+            <h1>Hedgehog Demo Runtime</h1>
+            <div class="muted">Live local cluster state and synthetic write/read/delete traffic.</div>
+          </div>
+          <div id="runner-state" class="status off">loading</div>
+        </div>
+        <section class="grid" id="cards"></section>
+        <section class="section card">
+          <h2>Recent Activity</h2>
+          <table><thead><tr><th>Tick</th><th>Object</th><th>Head</th><th>Replicas</th><th>Completed</th></tr></thead><tbody id="activity"></tbody></table>
+        </section>
+        <section class="section card">
+          <h2>Recent Failures</h2>
+          <table><thead><tr><th>Time</th><th>Object</th><th>Error</th></tr></thead><tbody id="failures"></tbody></table>
+        </section>
+      </main>
+      <script>
+        const fmt = value => value == null ? "n/a" : new Date(value).toLocaleString();
+        const num = value => Number(value).toLocaleString();
+        const text = value => String(value ?? "").replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[ch]));
+        async function refresh() {
+          const response = await fetch("/runtime/demo/status", { cache: "no-store" });
+          const data = await response.json();
+          const state = document.querySelector("#runner-state");
+          state.textContent = data.enabled ? `traffic on, every ${data.interval}` : "traffic off";
+          state.className = data.enabled ? "status" : "status off";
+          document.querySelector("#cards").innerHTML = [
+            ["Heads", `${num(data.runningHeads)} / ${num(data.headCount)}`],
+            ["Storage Nodes", `${num(data.runningStorageNodes)} / ${num(data.storageNodeCount)}`],
+            ["Replica Files", num(data.replicaFiles)],
+            ["Healthy Replicas", num(data.metadata.healthyReplicas)],
+            ["Objects", num(data.metadata.objects)],
+            ["Delete Markers", num(data.metadata.deleteMarkers)],
+            ["Writes", num(data.writesSucceeded)],
+            ["Reads", num(data.readsSucceeded)],
+            ["Deletes", num(data.deletesSucceeded)],
+            ["Failures", num(data.ticksFailed)]
+          ].map(([label, value]) => `<div class="card"><div class="muted">${label}</div><div class="value">${value}</div></div>`).join("");
+          document.querySelector("#activity").innerHTML = data.recentActivity.length
+            ? data.recentActivity.slice().reverse().map(item => `<tr><td>${item.tick}</td><td><code>${text(item.objectName)}</code></td><td><code>${text(item.headId)}</code></td><td>${item.replicaCount}</td><td>${fmt(item.completedAt)}</td></tr>`).join("")
+            : `<tr><td colspan="5" class="muted">No synthetic traffic yet.</td></tr>`;
+          document.querySelector("#failures").innerHTML = data.recentFailures.length
+            ? data.recentFailures.slice().reverse().map(item => `<tr><td>${fmt(item.failedAt)}</td><td><code>${text(item.objectName)}</code></td><td class="error">${text(item.errorType)}: ${text(item.message)}</td></tr>`).join("")
+            : `<tr><td colspan="3" class="muted">No recent failures.</td></tr>`;
+        }
+        refresh();
+        setInterval(refresh, 5000);
+      </script>
+    </body>
+    </html>
+    """,
+    "text/html; charset=utf-8"));
 
 app.MapGet("/health/live", () => Results.Ok(new HealthLiveDto(
     "Hedgehog.LocalRuntime.Api",
@@ -69,6 +156,12 @@ app.MapGet("/runtime/status", async (LocalCluster runtime, CancellationToken can
             node.FreeBytes,
             node.Replicas.Count)).ToArray()));
 });
+
+app.MapGet("/runtime/demo/status", async (DemoTrafficRunner runner, CancellationToken cancellationToken) =>
+    Results.Ok(await runner.SnapshotAsync(cancellationToken)));
+
+app.MapPost("/runtime/demo/tick", async (DemoTrafficRunner runner, CancellationToken cancellationToken) =>
+    Results.Ok(await runner.RunOnceAsync(cancellationToken)));
 
 app.MapGet("/metrics", async (
     LocalCluster runtime,
