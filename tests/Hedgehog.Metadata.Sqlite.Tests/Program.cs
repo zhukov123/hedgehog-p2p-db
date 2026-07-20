@@ -29,6 +29,7 @@ await RemainingWorkflowSetPersistsCoherentMetadataAsync(connection);
 await ClaimOutboxClaimsEligibleEventsAsync(connection);
 await CapacityReportRejectsInvalidAccountingAsync(connection);
 await ExpireReservationRejectsEarlyExpiryAsync(connection);
+await EvaluateRecoveryGateBlocksUntilAuthorityWorkIsReconciledAsync(connection);
 await AssertForeignKeyCheckCleanAsync(connection);
 
 Console.WriteLine("Hedgehog.Metadata.Sqlite.Tests passed.");
@@ -503,6 +504,77 @@ static async Task ExpireReservationRejectsEarlyExpiryAsync(SqliteConnection conn
 
     Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM capacity_reservations WHERE reservation_id = 'reservation-d' AND state = 'reserved';"));
     Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM replicas WHERE replica_id = 'replica-d' AND state = 'planned';"));
+}
+
+static async Task EvaluateRecoveryGateBlocksUntilAuthorityWorkIsReconciledAsync(SqliteConnection connection)
+{
+    var workflowStore = SqliteMetadataAuthority.CreateWorkflowStore();
+    var evaluatedAt = new DateTimeOffset(2026, 1, 2, 7, 10, 0, TimeSpan.Zero);
+
+    await ExecuteAsync(
+        connection,
+        """
+        UPDATE metadata_store
+        SET degraded_mode = 'recovering';
+        """);
+
+    var blocked = await workflowStore.EvaluateRecoveryGateAsync(
+        connection,
+        new SqliteEvaluateRecoveryGateRequest(
+            "actor-a",
+            evaluatedAt,
+            TimeSpan.FromMinutes(30),
+            ExpectedMigrationCount: 6,
+            "idem-evaluate-recovery-blocked"));
+
+    Equal("recovering", blocked.WorkflowResult.State);
+    Equal(false, blocked.WorkflowResult.Replayed);
+    Equal("recovery.blocked", blocked.WorkflowResult.OutboxTopics.Single());
+    Equal(false, blocked.Checks.Single(check => check.Name == "outbox_lag_within_threshold").Passed);
+    Equal(false, blocked.Checks.Single(check => check.Name == "no_expired_issued_leases").Passed);
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM metadata_store WHERE degraded_mode = 'recovering';"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM audit_events WHERE workflow = 'evaluate_recovery_gate' AND decision = 'denied';"));
+
+    await ExecuteAsync(
+        connection,
+        """
+        UPDATE outbox_events
+        SET delivered_at_ms = @delivered_at_ms
+        WHERE delivered_at_ms IS NULL;
+
+        UPDATE leases
+        SET state = 'completed',
+            completed_at_ms = @delivered_at_ms
+        WHERE state = 'issued'
+          AND expires_at_ms <= @delivered_at_ms;
+        """,
+        ("@delivered_at_ms", evaluatedAt.ToUnixTimeMilliseconds()));
+
+    var passed = await workflowStore.EvaluateRecoveryGateAsync(
+        connection,
+        new SqliteEvaluateRecoveryGateRequest(
+            "actor-a",
+            evaluatedAt.AddSeconds(1),
+            TimeSpan.FromMinutes(30),
+            ExpectedMigrationCount: 6,
+            "idem-evaluate-recovery-passed"));
+
+    Equal("normal", passed.WorkflowResult.State);
+    Equal("recovery.normal", passed.WorkflowResult.OutboxTopics.Single());
+    Equal(true, passed.Checks.All(check => check.Passed));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM metadata_store WHERE degraded_mode = 'normal';"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM audit_events WHERE workflow = 'evaluate_recovery_gate' AND decision = 'allowed';"));
+
+    var replay = await workflowStore.EvaluateRecoveryGateAsync(
+        connection,
+        new SqliteEvaluateRecoveryGateRequest(
+            "actor-a",
+            evaluatedAt.AddSeconds(1),
+            TimeSpan.FromMinutes(30),
+            ExpectedMigrationCount: 6,
+            "idem-evaluate-recovery-passed"));
+
+    Equal(true, replay.WorkflowResult.Replayed);
 }
 
 static async Task<int> ScalarIntAsync(SqliteConnection connection, string sql)

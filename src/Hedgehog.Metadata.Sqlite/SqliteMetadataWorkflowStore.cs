@@ -1200,6 +1200,236 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
         }
     }
 
+    public async Task<SqliteEvaluateRecoveryGateResult> EvaluateRecoveryGateAsync(
+        IDbConnection connection,
+        SqliteEvaluateRecoveryGateRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateEvaluateRecoveryGate(request);
+        var db = RequireDbConnection(connection);
+        await EnsureOpenAsync(db, cancellationToken).ConfigureAwait(false);
+        await using var transaction = await db.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            var replay = await TryBeginIdempotencyAsync(
+                db,
+                transaction,
+                request.IdempotencyKey,
+                tenantId: null,
+                datasetId: null,
+                MetadataWorkflowNames.EvaluateRecoveryGate,
+                request.ActorId,
+                request,
+                request.EvaluatedAt,
+                cancellationToken).ConfigureAwait(false);
+
+            if (replay)
+            {
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                return new SqliteEvaluateRecoveryGateResult(
+                    new SqliteWorkflowResult(MetadataWorkflowNames.EvaluateRecoveryGate, "replayed", Replayed: true, []),
+                    []);
+            }
+
+            var checks = await EvaluateRecoveryGateChecksAsync(db, transaction, request, cancellationToken)
+                .ConfigureAwait(false);
+            var passed = checks.All(static check => check.Passed);
+            var state = passed ? "normal" : "recovering";
+
+            var updated = await ExecuteAsync(
+                db,
+                transaction,
+                """
+                UPDATE metadata_store
+                SET degraded_mode = @degraded_mode,
+                    updated_at_ms = @evaluated_at_ms
+                WHERE store_id = 'default';
+                """,
+                cancellationToken,
+                ("@degraded_mode", state),
+                ("@evaluated_at_ms", ToUnixMs(request.EvaluatedAt))).ConfigureAwait(false);
+
+            if (updated != 1)
+            {
+                throw new InvalidOperationException("Default metadata store was not found.");
+            }
+
+            await ExecuteAsync(
+                db,
+                transaction,
+                """
+                INSERT INTO audit_events (
+                    workflow,
+                    decision,
+                    actor_id,
+                    idempotency_key,
+                    occurred_at_ms
+                )
+                VALUES (
+                    @workflow,
+                    @decision,
+                    @actor_id,
+                    @idempotency_key,
+                    @occurred_at_ms
+                );
+                """,
+                cancellationToken,
+                ("@workflow", MetadataWorkflowNames.EvaluateRecoveryGate),
+                ("@decision", passed ? "allowed" : "denied"),
+                ("@actor_id", request.ActorId),
+                ("@idempotency_key", request.IdempotencyKey),
+                ("@occurred_at_ms", ToUnixMs(request.EvaluatedAt))).ConfigureAwait(false);
+
+            await CompleteIdempotencyAsync(db, transaction, request.IdempotencyKey, request.EvaluatedAt, cancellationToken)
+                .ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+
+            return new SqliteEvaluateRecoveryGateResult(
+                new SqliteWorkflowResult(
+                    MetadataWorkflowNames.EvaluateRecoveryGate,
+                    state,
+                    Replayed: false,
+                    [passed ? "recovery.normal" : "recovery.blocked"]),
+                checks);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    private static async Task<IReadOnlyList<SqliteRecoveryGateCheck>> EvaluateRecoveryGateChecksAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        SqliteEvaluateRecoveryGateRequest request,
+        CancellationToken cancellationToken)
+    {
+        var evaluatedAtMs = ToUnixMs(request.EvaluatedAt);
+        var oldestAllowedOutboxMs = ToUnixMs(request.EvaluatedAt.Subtract(request.MaxOutboxLag));
+        var checks = new List<SqliteRecoveryGateCheck>();
+
+        var appliedMigrations = await ScalarLongAsync(
+            connection,
+            transaction,
+            "SELECT COUNT(*) FROM __hedgehog_schema_migrations;",
+            cancellationToken).ConfigureAwait(false) ?? 0;
+        checks.Add(new SqliteRecoveryGateCheck(
+            "migrations_current",
+            appliedMigrations >= request.ExpectedMigrationCount,
+            appliedMigrations,
+            $"applied migrations must be at least {request.ExpectedMigrationCount}."));
+
+        var foreignKeyViolations = await ScalarLongAsync(
+            connection,
+            transaction,
+            "SELECT COUNT(*) FROM pragma_foreign_key_check;",
+            cancellationToken).ConfigureAwait(false) ?? 0;
+        checks.Add(new SqliteRecoveryGateCheck(
+            "foreign_keys_consistent",
+            foreignKeyViolations == 0,
+            foreignKeyViolations,
+            "SQLite foreign key check must not report orphaned authority rows."));
+
+        var quickCheckResult = await ScalarStringAsync(
+            connection,
+            transaction,
+            "PRAGMA quick_check;",
+            cancellationToken).ConfigureAwait(false);
+        checks.Add(new SqliteRecoveryGateCheck(
+            "sqlite_quick_check_ok",
+            string.Equals(quickCheckResult, "ok", StringComparison.Ordinal),
+            string.Equals(quickCheckResult, "ok", StringComparison.Ordinal) ? 0 : 1,
+            "SQLite quick_check must return ok before normal mode resumes."));
+
+        var overdueOutbox = await ScalarLongAsync(
+            connection,
+            transaction,
+            """
+            SELECT COUNT(*)
+            FROM outbox_events
+            WHERE delivered_at_ms IS NULL
+              AND available_at_ms <= @oldest_allowed_ms;
+            """,
+            cancellationToken,
+            ("@oldest_allowed_ms", oldestAllowedOutboxMs)).ConfigureAwait(false) ?? 0;
+        checks.Add(new SqliteRecoveryGateCheck(
+            "outbox_lag_within_threshold",
+            overdueOutbox == 0,
+            overdueOutbox,
+            "pending outbox events must not exceed the configured recovery lag threshold."));
+
+        var expiredActiveReservations = await ScalarLongAsync(
+            connection,
+            transaction,
+            """
+            SELECT COUNT(*)
+            FROM capacity_reservations
+            WHERE state IN ('pending', 'reserved', 'streaming', 'finalizing')
+              AND expires_at_ms <= @evaluated_at_ms;
+            """,
+            cancellationToken,
+            ("@evaluated_at_ms", evaluatedAtMs)).ConfigureAwait(false) ?? 0;
+        checks.Add(new SqliteRecoveryGateCheck(
+            "no_expired_active_reservations",
+            expiredActiveReservations == 0,
+            expiredActiveReservations,
+            "expired active reservations must be expired or converted before normal mode resumes."));
+
+        var expiredIssuedLeases = await ScalarLongAsync(
+            connection,
+            transaction,
+            """
+            SELECT COUNT(*)
+            FROM leases
+            WHERE state = 'issued'
+              AND expires_at_ms <= @evaluated_at_ms;
+            """,
+            cancellationToken,
+            ("@evaluated_at_ms", evaluatedAtMs)).ConfigureAwait(false) ?? 0;
+        checks.Add(new SqliteRecoveryGateCheck(
+            "no_expired_issued_leases",
+            expiredIssuedLeases == 0,
+            expiredIssuedLeases,
+            "expired issued leases must be reconciled before normal mode resumes."));
+
+        var unrepairedUnderReplicatedVersions = await ScalarLongAsync(
+            connection,
+            transaction,
+            """
+            SELECT COUNT(*)
+            FROM object_versions version
+            WHERE version.state = 'under_replicated'
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM repair_jobs job
+                  WHERE job.version_id = version.version_id
+                    AND job.state IN ('pending', 'leased', 'running', 'verifying', 'retry_wait')
+              );
+            """,
+            cancellationToken).ConfigureAwait(false) ?? 0;
+        checks.Add(new SqliteRecoveryGateCheck(
+            "under_replicated_versions_have_repair",
+            unrepairedUnderReplicatedVersions == 0,
+            unrepairedUnderReplicatedVersions,
+            "under-replicated committed versions must have active repair work before normal mode resumes."));
+
+        var auditAppendVisible = await ScalarLongAsync(
+            connection,
+            transaction,
+            "SELECT COUNT(*) FROM workflow_definitions WHERE name = @workflow;",
+            cancellationToken,
+            ("@workflow", MetadataWorkflowNames.EvaluateRecoveryGate)).ConfigureAwait(false) ?? 0;
+        checks.Add(new SqliteRecoveryGateCheck(
+            "audit_append_available",
+            auditAppendVisible == 1,
+            auditAppendVisible,
+            "the recovery gate workflow must be registered so the audit append can commit."));
+
+        return checks;
+    }
+
     private static async Task<IReadOnlyList<SqliteClaimedOutboxEvent>> ClaimOutboxRowsAsync(
         DbConnection connection,
         DbTransaction transaction,
@@ -1634,6 +1864,14 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
         {
             RequireText(request.Topic, nameof(request.Topic));
         }
+    }
+
+    private static void ValidateEvaluateRecoveryGate(SqliteEvaluateRecoveryGateRequest request)
+    {
+        RequireText(request.ActorId, nameof(request.ActorId));
+        RequirePositive(request.MaxOutboxLag, nameof(request.MaxOutboxLag));
+        RequirePositive(request.ExpectedMigrationCount, nameof(request.ExpectedMigrationCount));
+        RequireText(request.IdempotencyKey, nameof(request.IdempotencyKey));
     }
 
     private static void RequireKnownLabel(IReadOnlyList<LabelSpec> labels, string value, string name)
