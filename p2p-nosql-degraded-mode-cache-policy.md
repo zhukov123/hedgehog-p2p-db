@@ -33,6 +33,11 @@ Transition rules:
 - `degraded_read_only -> recovering` when metadata store returns but cache reload and replay have not completed.
 - `recovering -> normal` only after migrations are current, invariant checks pass, outbox lag is within threshold, audit append works, and all authority caches are rebuilt from metadata store.
 
+SQLite authority implementation note:
+- The `evaluate_recovery_gate` workflow records each gate in `recovery_gates` and keeps the associated node in `recovering` until migrations, invariant checks, outbox lag, audit append, and cache rebuild are all passing.
+- A passing evaluation closes the gate and returns the node's `degraded_mode` to `normal`; failed evaluations stay open with a reason listing the missing checks.
+- Each evaluation is idempotent and audited against the node so the admin surface can distinguish blocked recovery from successfully cleared recovery.
+
 ## Cache Policy Table
 
 | Record | Max cache age | Allowed during metadata outage | Fail behavior | Revocation rule | Recovery/audit requirement |

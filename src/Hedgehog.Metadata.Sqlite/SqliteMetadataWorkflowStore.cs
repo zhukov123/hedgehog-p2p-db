@@ -1160,6 +1160,163 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
         }
     }
 
+    public async Task<SqliteWorkflowResult> EvaluateRecoveryGateAsync(
+        IDbConnection connection,
+        SqliteEvaluateRecoveryGateRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateEvaluateRecoveryGate(request);
+        var db = RequireDbConnection(connection);
+        await EnsureOpenAsync(db, cancellationToken).ConfigureAwait(false);
+        await using var transaction = await db.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            var replay = await TryBeginIdempotencyAsync(
+                db,
+                transaction,
+                request.IdempotencyKey,
+                tenantId: null,
+                datasetId: null,
+                MetadataWorkflowNames.EvaluateRecoveryGate,
+                actorId: null,
+                request,
+                request.EvaluatedAt,
+                cancellationToken).ConfigureAwait(false);
+
+            if (replay)
+            {
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                return new SqliteWorkflowResult(MetadataWorkflowNames.EvaluateRecoveryGate, "replayed", Replayed: true, []);
+            }
+
+            var nodeExists = await ScalarLongAsync(
+                db,
+                transaction,
+                "SELECT COUNT(*) FROM nodes WHERE node_id = @node_id;",
+                cancellationToken,
+                ("@node_id", request.NodeId)).ConfigureAwait(false);
+            if (nodeExists != 1)
+            {
+                throw new InvalidOperationException("Recovery gate node was not found.");
+            }
+
+            var passed = request.MigrationsCurrent
+                && request.InvariantsPassed
+                && request.OutboxLagWithinThreshold
+                && request.AuditAppendAvailable
+                && request.AuthorityCacheRebuilt;
+            var state = passed ? "closed" : "open";
+            var reason = passed ? "all recovery checks passed" : BuildRecoveryGateReason(request);
+            var evaluatedAtMs = ToUnixMs(request.EvaluatedAt);
+
+            await ExecuteAsync(
+                db,
+                transaction,
+                """
+                INSERT INTO recovery_gates (
+                    gate_id,
+                    node_id,
+                    name,
+                    state,
+                    severity,
+                    reason,
+                    migrations_current,
+                    invariants_passed,
+                    outbox_lag_within_threshold,
+                    audit_append_available,
+                    authority_cache_rebuilt,
+                    opened_at_ms,
+                    evaluated_at_ms,
+                    closed_at_ms,
+                    idempotency_key
+                )
+                VALUES (
+                    @gate_id,
+                    @node_id,
+                    @name,
+                    @state,
+                    @severity,
+                    @reason,
+                    @migrations_current,
+                    @invariants_passed,
+                    @outbox_lag_within_threshold,
+                    @audit_append_available,
+                    @authority_cache_rebuilt,
+                    @evaluated_at_ms,
+                    @evaluated_at_ms,
+                    @closed_at_ms,
+                    @idempotency_key
+                )
+                ON CONFLICT (gate_id) DO UPDATE SET
+                    node_id = excluded.node_id,
+                    name = excluded.name,
+                    state = excluded.state,
+                    severity = excluded.severity,
+                    reason = excluded.reason,
+                    migrations_current = excluded.migrations_current,
+                    invariants_passed = excluded.invariants_passed,
+                    outbox_lag_within_threshold = excluded.outbox_lag_within_threshold,
+                    audit_append_available = excluded.audit_append_available,
+                    authority_cache_rebuilt = excluded.authority_cache_rebuilt,
+                    evaluated_at_ms = excluded.evaluated_at_ms,
+                    closed_at_ms = excluded.closed_at_ms,
+                    idempotency_key = excluded.idempotency_key;
+                """,
+                cancellationToken,
+                ("@gate_id", request.GateId),
+                ("@node_id", request.NodeId),
+                ("@name", request.GateName),
+                ("@state", state),
+                ("@severity", request.Severity),
+                ("@reason", reason),
+                ("@migrations_current", request.MigrationsCurrent ? 1 : 0),
+                ("@invariants_passed", request.InvariantsPassed ? 1 : 0),
+                ("@outbox_lag_within_threshold", request.OutboxLagWithinThreshold ? 1 : 0),
+                ("@audit_append_available", request.AuditAppendAvailable ? 1 : 0),
+                ("@authority_cache_rebuilt", request.AuthorityCacheRebuilt ? 1 : 0),
+                ("@evaluated_at_ms", evaluatedAtMs),
+                ("@closed_at_ms", passed ? evaluatedAtMs : null),
+                ("@idempotency_key", request.IdempotencyKey)).ConfigureAwait(false);
+
+            var degradedMode = passed ? "normal" : "recovering";
+            await ExecuteAsync(
+                db,
+                transaction,
+                """
+                UPDATE nodes
+                SET degraded_mode = @degraded_mode,
+                    last_seen_at_ms = @evaluated_at_ms
+                WHERE node_id = @node_id
+                  AND state IN ('active', 'draining', 'quarantined');
+                """,
+                cancellationToken,
+                ("@degraded_mode", degradedMode),
+                ("@evaluated_at_ms", evaluatedAtMs),
+                ("@node_id", request.NodeId)).ConfigureAwait(false);
+
+            await AppendNodeAuditAsync(
+                db,
+                transaction,
+                MetadataWorkflowNames.EvaluateRecoveryGate,
+                passed ? "allowed" : "denied",
+                request.NodeId,
+                request.IdempotencyKey,
+                request.EvaluatedAt,
+                cancellationToken).ConfigureAwait(false);
+
+            await CompleteIdempotencyAsync(db, transaction, request.IdempotencyKey, request.EvaluatedAt, cancellationToken)
+                .ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return new SqliteWorkflowResult(MetadataWorkflowNames.EvaluateRecoveryGate, state, Replayed: false, [$"recovery_gate.{state}"]);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
+    }
+
     public async Task<SqliteClaimOutboxResult> ClaimOutboxAsync(
         IDbConnection connection,
         SqliteClaimOutboxRequest request,
@@ -1634,6 +1791,50 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
         {
             RequireText(request.Topic, nameof(request.Topic));
         }
+    }
+
+    private static void ValidateEvaluateRecoveryGate(SqliteEvaluateRecoveryGateRequest request)
+    {
+        RequireText(request.NodeId, nameof(request.NodeId));
+        RequireText(request.GateId, nameof(request.GateId));
+        RequireText(request.GateName, nameof(request.GateName));
+        RequireText(request.Severity, nameof(request.Severity));
+        RequireText(request.IdempotencyKey, nameof(request.IdempotencyKey));
+        if (request.Severity is not ("info" or "warning" or "critical"))
+        {
+            throw new ArgumentOutOfRangeException(nameof(request.Severity), request.Severity, "Severity must be info, warning, or critical.");
+        }
+    }
+
+    private static string BuildRecoveryGateReason(SqliteEvaluateRecoveryGateRequest request)
+    {
+        var missing = new List<string>(capacity: 5);
+        if (!request.MigrationsCurrent)
+        {
+            missing.Add("migrations current");
+        }
+
+        if (!request.InvariantsPassed)
+        {
+            missing.Add("invariants passed");
+        }
+
+        if (!request.OutboxLagWithinThreshold)
+        {
+            missing.Add("outbox lag within threshold");
+        }
+
+        if (!request.AuditAppendAvailable)
+        {
+            missing.Add("audit append available");
+        }
+
+        if (!request.AuthorityCacheRebuilt)
+        {
+            missing.Add("authority cache rebuilt");
+        }
+
+        return "waiting for " + string.Join(", ", missing);
     }
 
     private static void RequireKnownLabel(IReadOnlyList<LabelSpec> labels, string value, string name)
