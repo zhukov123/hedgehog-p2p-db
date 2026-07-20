@@ -21,6 +21,7 @@ try
     await StressScenarioAsync(Path.Combine(runtimeRoot, "stress"));
     await RestoreDrillAsync(Path.Combine(runtimeRoot, "restore"));
     await RuntimeApiHealthEndpointsAsync(Path.Combine(runtimeRoot, "api-health"));
+    await RuntimeApiDemoTrafficEndpointsAsync(Path.Combine(runtimeRoot, "api-demo"));
 
     Console.WriteLine("Hedgehog.LocalRuntime.Tests passed.");
 }
@@ -134,6 +135,49 @@ static async Task RuntimeApiHealthEndpointsAsync(string runtimeRoot)
     Equal(ready.TotalHeads, cluster.TotalHeads);
     Equal(ready.TotalStorageNodes, cluster.TotalStorageNodes);
     True(cluster.RuntimeRoot.EndsWith("api-health", StringComparison.Ordinal), "cluster health should expose runtime root");
+}
+
+static async Task RuntimeApiDemoTrafficEndpointsAsync(string runtimeRoot)
+{
+    var contentRoot = Path.Combine(FindRepoRoot(), "src", "Hedgehog.LocalRuntime.Api");
+    await using var app = new WebApplicationFactory<LocalRuntimeApiAssemblyMarker>()
+        .WithWebHostBuilder(builder =>
+        {
+            builder.UseContentRoot(contentRoot);
+            builder.UseSetting("runtime-root", runtimeRoot);
+            builder.UseSetting("reset-runtime", "true");
+        });
+    using var client = app.CreateClient();
+
+    var page = await client.GetStringAsync("/demo");
+    True(page.Contains("Hedgehog Demo Runtime", StringComparison.Ordinal), "demo page should render a browser surface");
+
+    var before = await client.GetFromJsonAsync<DemoTrafficSnapshotDto>("/runtime/demo/status")
+        ?? throw new InvalidOperationException("demo status endpoint returned no payload");
+    Equal(false, before.Enabled);
+    Equal(2, before.HeadCount);
+    Equal(3, before.StorageNodeCount);
+    Equal(0, before.TicksSucceeded);
+
+    var tickResponse = await client.PostAsync("/runtime/demo/tick", content: null);
+    tickResponse.EnsureSuccessStatusCode();
+    var tick = await tickResponse.Content.ReadFromJsonAsync<DemoTrafficEventDto>()
+        ?? throw new InvalidOperationException("demo tick endpoint returned no payload");
+    Equal("ok", tick.Result);
+    Equal(3, tick.ReplicaCount);
+
+    var after = await client.GetFromJsonAsync<DemoTrafficSnapshotDto>("/runtime/demo/status")
+        ?? throw new InvalidOperationException("demo status endpoint returned no payload after tick");
+    Equal(1, after.TicksStarted);
+    Equal(1, after.TicksSucceeded);
+    Equal(0, after.TicksFailed);
+    Equal(1, after.WritesSucceeded);
+    Equal(1, after.ReadsSucceeded);
+    Equal(1, after.DeletesSucceeded);
+    Equal(1, after.Metadata.Objects);
+    Equal(1, after.Metadata.DeleteMarkers);
+    Equal(3, after.Metadata.HealthyReplicas);
+    Equal(1, after.RecentActivity.Count);
 }
 
 static string FindRepoRoot()
