@@ -79,7 +79,7 @@ Admin is not a later dashboard. For v1, admin status, repair visibility, audit r
   - [x] cleanup conversion
   - [x] capacity report
   - [ ] accept invite
-  - [ ] revoke actor or node
+  - [x] revoke actor or node
   - [x] claim outbox
   - [ ] evaluate recovery gate
 - [ ] Add invariant queries and repair-readiness checks.
