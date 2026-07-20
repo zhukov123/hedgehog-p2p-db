@@ -115,6 +115,15 @@ public sealed record SqliteCapacityReportRequest(
     string IdempotencyKey,
     byte[]? RawReport = null);
 
+public sealed record SqliteRevokeActorOrNodeRequest(
+    string TenantId,
+    string ActorId,
+    string TargetType,
+    string TargetId,
+    string Reason,
+    DateTimeOffset RevokedAt,
+    string IdempotencyKey);
+
 public sealed record SqliteClaimOutboxRequest(
     string ClaimedBy,
     DateTimeOffset ClaimedAt,
@@ -185,6 +194,11 @@ public interface ISqliteMetadataWorkflowStore
     Task<SqliteWorkflowResult> RecordCapacityReportAsync(
         IDbConnection connection,
         SqliteCapacityReportRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<SqliteWorkflowResult> RevokeActorOrNodeAsync(
+        IDbConnection connection,
+        SqliteRevokeActorOrNodeRequest request,
         CancellationToken cancellationToken = default);
 
     Task<SqliteClaimOutboxResult> ClaimOutboxAsync(

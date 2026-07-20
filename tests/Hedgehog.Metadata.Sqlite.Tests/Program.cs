@@ -29,6 +29,7 @@ await RemainingWorkflowSetPersistsCoherentMetadataAsync(connection);
 await ClaimOutboxClaimsEligibleEventsAsync(connection);
 await CapacityReportRejectsInvalidAccountingAsync(connection);
 await ExpireReservationRejectsEarlyExpiryAsync(connection);
+await RevokeActorOrNodeTransitionsSecurityMetadataAsync(connection);
 await AssertForeignKeyCheckCleanAsync(connection);
 
 Console.WriteLine("Hedgehog.Metadata.Sqlite.Tests passed.");
@@ -81,6 +82,18 @@ static async Task SeedAuthorityAsync(SqliteConnection connection)
         VALUES
             ('node-a', 'tenant-a', 'Node A', 'active', 1000000, 0, 0, 1000000, @now_ms, @now_ms),
             ('node-b', 'tenant-a', 'Node B', 'active', 1000000, 0, 0, 1000000, @now_ms, @now_ms);
+
+        INSERT INTO node_keys (
+            node_key_id,
+            node_id,
+            key_id,
+            public_key_fingerprint,
+            state,
+            created_at_ms
+        )
+        VALUES
+            ('node-key-a', 'node-a', 'key-a', 'node-key-fingerprint-a', 'active', @now_ms),
+            ('node-key-b', 'node-b', 'key-b', 'node-key-fingerprint-b', 'active', @now_ms);
         """,
         ("@now_ms", now));
 }
@@ -503,6 +516,110 @@ static async Task ExpireReservationRejectsEarlyExpiryAsync(SqliteConnection conn
 
     Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM capacity_reservations WHERE reservation_id = 'reservation-d' AND state = 'reserved';"));
     Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM replicas WHERE replica_id = 'replica-d' AND state = 'planned';"));
+}
+
+static async Task RevokeActorOrNodeTransitionsSecurityMetadataAsync(SqliteConnection connection)
+{
+    var workflowStore = SqliteMetadataAuthority.CreateWorkflowStore();
+    var now = new DateTimeOffset(2026, 1, 2, 8, 9, 10, TimeSpan.Zero);
+
+    var nodeResult = await workflowStore.RevokeActorOrNodeAsync(
+        connection,
+        new SqliteRevokeActorOrNodeRequest(
+            "tenant-a",
+            "actor-a",
+            "node",
+            "node-b",
+            "compromised node key",
+            now,
+            "idem-revoke-node-b"));
+
+    Equal("node_revoked", nodeResult.State);
+    Equal("security.node_revoked", nodeResult.OutboxTopics.Single());
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM nodes WHERE node_id = 'node-b' AND state = 'revoked' AND retired_at_ms IS NOT NULL;"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM node_keys WHERE node_id = 'node-b' AND state = 'revoked' AND revoked_at_ms IS NOT NULL;"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM replicas WHERE replica_id = 'replica-b' AND state = 'suspect';"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM capacity_reservations WHERE reservation_id = 'reservation-b' AND state = 'committed';"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM object_versions WHERE version_id = 'version-a' AND state = 'under_replicated';"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM audit_events WHERE workflow = 'revoke_actor_or_node' AND node_id = 'node-b' AND decision = 'allowed';"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM outbox_events WHERE workflow = 'revoke_actor_or_node' AND topic = 'security.node_revoked' AND idempotency_key = 'idem-revoke-node-b:outbox';"));
+
+    var replay = await workflowStore.RevokeActorOrNodeAsync(
+        connection,
+        new SqliteRevokeActorOrNodeRequest(
+            "tenant-a",
+            "actor-a",
+            "node",
+            "node-b",
+            "compromised node key",
+            now,
+            "idem-revoke-node-b"));
+
+    Equal(true, replay.Replayed);
+
+    var nodeOutbox = await workflowStore.ClaimOutboxAsync(
+        connection,
+        new SqliteClaimOutboxRequest(
+            "security-worker",
+            now.AddMilliseconds(1),
+            TimeSpan.FromMinutes(1),
+            MaxItems: 10,
+            Topic: "security.node_revoked"));
+
+    Equal("claimed", nodeOutbox.WorkflowResult.State);
+    Equal(1, nodeOutbox.Events.Count);
+    Equal("security.node_revoked", nodeOutbox.Events.Single().Topic);
+
+    var actorResult = await workflowStore.RevokeActorOrNodeAsync(
+        connection,
+        new SqliteRevokeActorOrNodeRequest(
+            "tenant-a",
+            "actor-a",
+            "actor",
+            "actor-a",
+            "admin key rotation",
+            now.AddSeconds(1),
+            "idem-revoke-actor-a"));
+
+    Equal("actor_revoked", actorResult.State);
+    Equal("security.actor_revoked", actorResult.OutboxTopics.Single());
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM actors WHERE actor_id = 'actor-a' AND state = 'revoked' AND revoked_at_ms IS NOT NULL;"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM audit_events WHERE workflow = 'revoke_actor_or_node' AND actor_id = 'actor-a' AND decision = 'allowed';"));
+
+    var actorOutbox = await workflowStore.ClaimOutboxAsync(
+        connection,
+        new SqliteClaimOutboxRequest(
+            "security-worker",
+            now.AddSeconds(2),
+            TimeSpan.FromMinutes(1),
+            MaxItems: 10,
+            Topic: "security.actor_revoked"));
+
+    Equal("claimed", actorOutbox.WorkflowResult.State);
+    Equal(1, actorOutbox.Events.Count);
+    Equal("security.actor_revoked", actorOutbox.Events.Single().Topic);
+
+    await ThrowsAsync<ArgumentOutOfRangeException>(() => workflowStore.RevokeActorOrNodeAsync(
+        connection,
+        new SqliteRevokeActorOrNodeRequest(
+            "tenant-a",
+            "actor-a",
+            "dataset",
+            "dataset-a",
+            "invalid target type",
+            now.AddSeconds(2),
+            "idem-revoke-invalid-type")));
+
+    await ThrowsAsync<InvalidOperationException>(() => workflowStore.RevokeActorOrNodeAsync(
+        connection,
+        new SqliteRevokeActorOrNodeRequest(
+            "tenant-a",
+            "actor-a",
+            "node",
+            "node-missing",
+            "missing node",
+            now.AddSeconds(3),
+            "idem-revoke-missing-node")));
 }
 
 static async Task<int> ScalarIntAsync(SqliteConnection connection, string sql)
