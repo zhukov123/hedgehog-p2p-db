@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text;
 using Hedgehog.LocalRuntime;
+using Hedgehog.LocalRuntime.Api;
 
 internal sealed class LocalRuntimeMetrics
 {
@@ -38,7 +39,8 @@ internal sealed class LocalRuntimeMetrics
 
     public string RenderPrometheus(
         LocalClusterSnapshot snapshot,
-        IReadOnlyDictionary<string, long> metadataCounts)
+        IReadOnlyDictionary<string, long> metadataCounts,
+        RecoveryReadinessDto recovery)
     {
         var builder = new StringBuilder();
         builder.AppendLine("# HELP hedgehog_runtime_operations_total Total local runtime API operations.");
@@ -93,6 +95,17 @@ internal sealed class LocalRuntimeMetrics
         foreach (var node in snapshot.StorageNodes.OrderBy(node => node.NodeId, StringComparer.Ordinal))
         {
             builder.AppendLine($"hedgehog_runtime_storage_replicas{{node=\"{Escape(node.NodeId)}\"}} {node.Replicas.Count}");
+        }
+
+        builder.AppendLine("# HELP hedgehog_runtime_recovery_ready Recovery readiness decision from the canonical evaluator.");
+        builder.AppendLine("# TYPE hedgehog_runtime_recovery_ready gauge");
+        builder.AppendLine($"hedgehog_runtime_recovery_ready {Convert.ToInt32(recovery.Ready)}");
+        builder.AppendLine("# HELP hedgehog_runtime_recovery_gate Recovery gate outcomes from the canonical evaluator.");
+        builder.AppendLine("# TYPE hedgehog_runtime_recovery_gate gauge");
+        foreach (var gate in recovery.Gates.OrderBy(gate => gate.Name, StringComparer.Ordinal))
+        {
+            builder.AppendLine(
+                $"hedgehog_runtime_recovery_gate{{gate=\"{Escape(gate.Name)}\",status=\"{Escape(gate.Status)}\"}} 1");
         }
 
         builder.AppendLine("# HELP hedgehog_runtime_metadata_rows SQLite metadata row counts.");

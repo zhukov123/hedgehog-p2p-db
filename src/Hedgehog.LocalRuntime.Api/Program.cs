@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Hedgehog.Client;
 using Hedgehog.Head;
 using Hedgehog.LocalRuntime;
+using Hedgehog.LocalRuntime.Api;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddCors(options =>
@@ -28,6 +29,9 @@ await cluster.StartAsync();
 
 builder.Services.AddSingleton<LocalRuntimeMetrics>();
 builder.Services.AddSingleton(cluster);
+builder.Services.AddSingleton<RecoveryReadinessOptions>();
+builder.Services.AddSingleton<IRecoveryReadinessProbe, LocalRuntimeRecoveryReadinessProbe>();
+builder.Services.AddSingleton<RecoveryReadinessEvaluator>();
 
 var app = builder.Build();
 app.UseCors();
@@ -44,14 +48,20 @@ app.MapGet("/health/live", () => Results.Ok(new HealthLiveDto(
     "live",
     DateTimeOffset.UtcNow)));
 
-app.MapGet("/health/ready", async (LocalCluster runtime, CancellationToken cancellationToken) =>
+app.MapGet("/health/ready", async (
+    RecoveryReadinessEvaluator recoveryReadiness,
+    CancellationToken cancellationToken) =>
 {
-    var health = await LoadClusterHealthAsync(runtime, cancellationToken);
-    return health.Ready ? Results.Ok(health) : Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+    var health = await LoadClusterHealthAsync(recoveryReadiness, cancellationToken);
+    return Results.Json(
+        health,
+        statusCode: health.Ready ? StatusCodes.Status200OK : StatusCodes.Status503ServiceUnavailable);
 });
 
-app.MapGet("/health/cluster", async (LocalCluster runtime, CancellationToken cancellationToken) =>
-    Results.Ok(await LoadClusterHealthAsync(runtime, cancellationToken)));
+app.MapGet("/health/cluster", async (
+    RecoveryReadinessEvaluator recoveryReadiness,
+    CancellationToken cancellationToken) =>
+    Results.Ok(await LoadClusterHealthAsync(recoveryReadiness, cancellationToken)));
 
 app.MapGet("/runtime/status", async (LocalCluster runtime, CancellationToken cancellationToken) =>
 {
@@ -73,12 +83,14 @@ app.MapGet("/runtime/status", async (LocalCluster runtime, CancellationToken can
 app.MapGet("/metrics", async (
     LocalCluster runtime,
     LocalRuntimeMetrics metrics,
+    RecoveryReadinessEvaluator recoveryReadiness,
     CancellationToken cancellationToken) =>
 {
     var snapshot = await runtime.SnapshotAsync(cancellationToken);
     var metadataCounts = await LoadMetadataCountsAsync(runtime, cancellationToken);
+    var recovery = await recoveryReadiness.EvaluateAsync(cancellationToken);
     return Results.Text(
-        metrics.RenderPrometheus(snapshot, metadataCounts),
+        metrics.RenderPrometheus(snapshot, metadataCounts, recovery),
         "text/plain; version=0.0.4; charset=utf-8");
 });
 
@@ -230,33 +242,23 @@ static async Task<IReadOnlyDictionary<string, long>> LoadMetadataCountsAsync(
 }
 
 static async Task<HealthClusterDto> LoadClusterHealthAsync(
-    LocalCluster runtime,
+    RecoveryReadinessEvaluator recoveryReadiness,
     CancellationToken cancellationToken)
 {
-    var snapshot = await runtime.SnapshotAsync(cancellationToken);
-    var metadataAvailable = await runtime.ScalarLongAsync(
-        "SELECT COUNT(*) FROM tenants;",
-        cancellationToken) >= 0;
-    var runningHeads = snapshot.Heads.Count(head => head.IsRunning);
-    var runningStorageNodes = snapshot.StorageNodes.Count(node => node.IsRunning);
-    var ready = metadataAvailable
-        && snapshot.Tenants.Count > 0
-        && runningHeads == snapshot.Heads.Count
-        && runningStorageNodes == snapshot.StorageNodes.Count
-        && snapshot.StorageNodes.All(node => node.FreeBytes >= 0);
+    var recovery = await recoveryReadiness.EvaluateAsync(cancellationToken);
+    var summary = recovery.OperationalSummary;
 
     return new HealthClusterDto(
-        ready ? "ready" : "not_ready",
-        ready,
+        recovery.Ready ? "ready" : "not_ready",
+        recovery.Ready,
         DateTimeOffset.UtcNow,
-        snapshot.RuntimeRoot,
-        snapshot.MetadataPath,
-        metadataAvailable,
-        snapshot.Tenants.Count,
-        runningHeads,
-        snapshot.Heads.Count,
-        runningStorageNodes,
-        snapshot.StorageNodes.Count);
+        summary.MetadataAvailable,
+        summary.TenantCount,
+        summary.RunningHeads,
+        summary.TotalHeads,
+        summary.RunningStorageNodes,
+        summary.TotalStorageNodes,
+        recovery);
 }
 
 public sealed record CreateTenantRequest(string TenantId, string DatasetId);
@@ -274,14 +276,13 @@ public sealed record HealthClusterDto(
     string Status,
     bool Ready,
     DateTimeOffset CheckedAt,
-    string RuntimeRoot,
-    string MetadataPath,
     bool MetadataAvailable,
     int TenantCount,
     int RunningHeads,
     int TotalHeads,
     int RunningStorageNodes,
-    int TotalStorageNodes);
+    int TotalStorageNodes,
+    RecoveryReadinessDto Recovery);
 
 public sealed record TenantCreatedDto(string TenantId, string DatasetId, int RequiredReplicaCount);
 
