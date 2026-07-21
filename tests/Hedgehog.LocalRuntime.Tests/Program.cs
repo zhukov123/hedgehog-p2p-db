@@ -2,6 +2,8 @@ using Hedgehog.LocalRuntime;
 using Hedgehog.LocalRuntime.Api;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
 using System.Net.Http.Json;
 
 var runtimeRoot = Path.Combine(Path.GetTempPath(), $"hedgehog-local-runtime-test-{Guid.NewGuid():N}");
@@ -21,6 +23,10 @@ try
     await StressScenarioAsync(Path.Combine(runtimeRoot, "stress"));
     await RestoreDrillAsync(Path.Combine(runtimeRoot, "restore"));
     await RuntimeApiHealthEndpointsAsync(Path.Combine(runtimeRoot, "api-health"));
+    await RuntimeApiHealthFailsClosedForUnknownGatesAsync(Path.Combine(runtimeRoot, "api-unknown"));
+    await RuntimeApiHealthFailsClosedForFailedGateAsync(Path.Combine(runtimeRoot, "api-failed"));
+    await RuntimeApiHealthFailsClosedForProbeExceptionAsync(Path.Combine(runtimeRoot, "api-exception"));
+    await RuntimeApiHealthFailsClosedForProbeTimeoutAsync(Path.Combine(runtimeRoot, "api-timeout"));
 
     Console.WriteLine("Hedgehog.LocalRuntime.Tests passed.");
 }
@@ -103,14 +109,7 @@ static async Task StressScenarioAsync(string runtimeRoot)
 
 static async Task RuntimeApiHealthEndpointsAsync(string runtimeRoot)
 {
-    var contentRoot = Path.Combine(FindRepoRoot(), "src", "Hedgehog.LocalRuntime.Api");
-    await using var app = new WebApplicationFactory<LocalRuntimeApiAssemblyMarker>()
-        .WithWebHostBuilder(builder =>
-        {
-            builder.UseContentRoot(contentRoot);
-            builder.UseSetting("runtime-root", runtimeRoot);
-            builder.UseSetting("reset-runtime", "true");
-        });
+    await using var app = CreateApi(runtimeRoot, new StaticRecoveryReadinessProbe(AllPassedGates()));
     using var client = app.CreateClient();
 
     var live = await client.GetFromJsonAsync<HealthLiveDto>("/health/live")
@@ -118,7 +117,9 @@ static async Task RuntimeApiHealthEndpointsAsync(string runtimeRoot)
     Equal("Hedgehog.LocalRuntime.Api", live.Service);
     Equal("live", live.Status);
 
-    var ready = await client.GetFromJsonAsync<HealthClusterDto>("/health/ready")
+    var readyResponse = await client.GetAsync("/health/ready");
+    Equal(System.Net.HttpStatusCode.OK, readyResponse.StatusCode);
+    var ready = await readyResponse.Content.ReadFromJsonAsync<HealthClusterDto>()
         ?? throw new InvalidOperationException("ready health endpoint returned no payload");
     Equal(true, ready.Ready);
     Equal("ready", ready.Status);
@@ -128,12 +129,140 @@ static async Task RuntimeApiHealthEndpointsAsync(string runtimeRoot)
     Equal(3, ready.RunningStorageNodes);
     Equal(3, ready.TotalStorageNodes);
     Equal(true, ready.MetadataAvailable);
+    AssertCanonicalGates(ready.Recovery);
+    True(ready.Recovery.Gates.All(gate => gate.Status == RecoveryReadinessEvaluator.Passed), "all-passed probe should keep every gate passed");
 
     var cluster = await client.GetFromJsonAsync<HealthClusterDto>("/health/cluster")
         ?? throw new InvalidOperationException("cluster health endpoint returned no payload");
+    Equal(true, cluster.Ready);
     Equal(ready.TotalHeads, cluster.TotalHeads);
     Equal(ready.TotalStorageNodes, cluster.TotalStorageNodes);
-    True(cluster.RuntimeRoot.EndsWith("api-health", StringComparison.Ordinal), "cluster health should expose runtime root");
+    AssertCanonicalGates(cluster.Recovery);
+
+    var clusterPayload = await client.GetStringAsync("/health/cluster");
+    False(clusterPayload.Contains(runtimeRoot, StringComparison.Ordinal), "cluster health should not expose runtime root");
+    False(clusterPayload.Contains("metadata", StringComparison.OrdinalIgnoreCase) && clusterPayload.Contains(".sqlite", StringComparison.OrdinalIgnoreCase), "cluster health should not expose metadata path");
+
+    var metrics = await client.GetStringAsync("/metrics");
+    True(metrics.Contains("hedgehog_runtime_recovery_ready 1", StringComparison.Ordinal), "metrics should render the same ready decision");
+}
+
+static async Task RuntimeApiHealthFailsClosedForUnknownGatesAsync(string runtimeRoot)
+{
+    await using var app = CreateApi(runtimeRoot);
+    using var client = app.CreateClient();
+
+    var response = await client.GetAsync("/health/ready");
+    Equal(System.Net.HttpStatusCode.ServiceUnavailable, response.StatusCode);
+    var ready = await response.Content.ReadFromJsonAsync<HealthClusterDto>()
+        ?? throw new InvalidOperationException("closed ready health endpoint returned no payload");
+    Equal(false, ready.Ready);
+    Equal("not_ready", ready.Status);
+    AssertCanonicalGates(ready.Recovery);
+    True(ready.Recovery.Gates.Any(gate => gate.Name == "manifest_reconciliation" && gate.Status == RecoveryReadinessEvaluator.Unknown), "manifest reconciliation should remain unknown until implemented");
+    True(ready.Recovery.Gates.Any(gate => gate.Name == "reservation_reconciliation" && gate.Status == RecoveryReadinessEvaluator.Unknown), "reservation reconciliation should remain unknown until implemented");
+    True(ready.Recovery.Gates.Any(gate => gate.Name == "repair_deficit" && gate.Status == RecoveryReadinessEvaluator.Unknown), "repair deficit should remain unknown until implemented");
+    True(ready.Recovery.Gates.Any(gate => gate.Name == "fresh_capacity_reports" && gate.Status == RecoveryReadinessEvaluator.Unknown), "fresh capacity reports should remain unknown until implemented");
+}
+
+static async Task RuntimeApiHealthFailsClosedForFailedGateAsync(string runtimeRoot)
+{
+    var gates = AllPassedGates()
+        .Select(gate => gate.Name == "audit_continuity"
+            ? new RecoveryGateProbeResult(gate.Name, RecoveryReadinessEvaluator.Failed, "audit_gap")
+            : gate)
+        .ToArray();
+    await using var app = CreateApi(runtimeRoot, new StaticRecoveryReadinessProbe(gates));
+    using var client = app.CreateClient();
+
+    var response = await client.GetAsync("/health/ready");
+    Equal(System.Net.HttpStatusCode.ServiceUnavailable, response.StatusCode);
+    var ready = await response.Content.ReadFromJsonAsync<HealthClusterDto>()
+        ?? throw new InvalidOperationException("failed ready health endpoint returned no payload");
+    Equal(false, ready.Ready);
+    var failed = ready.Recovery.Gates.Single(gate => gate.Status == RecoveryReadinessEvaluator.Failed);
+    Equal("audit_continuity", failed.Name);
+    Equal("audit_gap", failed.Reason);
+
+    var metrics = await client.GetStringAsync("/metrics");
+    True(metrics.Contains("hedgehog_runtime_recovery_ready 0", StringComparison.Ordinal), "metrics should render the same not-ready decision");
+}
+
+static async Task RuntimeApiHealthFailsClosedForProbeExceptionAsync(string runtimeRoot)
+{
+    await using var app = CreateApi(runtimeRoot, new ThrowingRecoveryReadinessProbe());
+    using var client = app.CreateClient();
+
+    var response = await client.GetAsync("/health/ready");
+    Equal(System.Net.HttpStatusCode.ServiceUnavailable, response.StatusCode);
+    var payload = await response.Content.ReadAsStringAsync();
+    False(payload.Contains(runtimeRoot, StringComparison.Ordinal), "exception payload should not expose runtime root");
+    False(payload.Contains("boom", StringComparison.OrdinalIgnoreCase), "exception payload should not expose exception detail");
+
+    var ready = await response.Content.ReadFromJsonAsync<HealthClusterDto>()
+        ?? throw new InvalidOperationException("exception ready health endpoint returned no payload");
+    Equal(false, ready.Ready);
+    AssertCanonicalGates(ready.Recovery);
+    True(ready.Recovery.Gates.All(gate => gate.Status == RecoveryReadinessEvaluator.Unknown), "probe exceptions should make every gate unknown");
+}
+
+static async Task RuntimeApiHealthFailsClosedForProbeTimeoutAsync(string runtimeRoot)
+{
+    await using var app = CreateApi(
+        runtimeRoot,
+        new SlowRecoveryReadinessProbe(),
+        new RecoveryReadinessOptions { EvaluationTimeout = TimeSpan.FromMilliseconds(25) });
+    using var client = app.CreateClient();
+
+    var response = await client.GetAsync("/health/ready");
+    Equal(System.Net.HttpStatusCode.ServiceUnavailable, response.StatusCode);
+    var ready = await response.Content.ReadFromJsonAsync<HealthClusterDto>()
+        ?? throw new InvalidOperationException("timeout ready health endpoint returned no payload");
+    Equal(false, ready.Ready);
+    Equal(false, ready.MetadataAvailable);
+    AssertCanonicalGates(ready.Recovery);
+    True(ready.Recovery.Gates.All(gate => gate.Status == RecoveryReadinessEvaluator.Unknown), "probe timeouts should make every gate unknown");
+    True(ready.Recovery.Gates.All(gate => gate.Reason == "probe_timeout"), "probe timeouts should use a bounded reason");
+}
+
+static WebApplicationFactory<LocalRuntimeApiAssemblyMarker> CreateApi(
+    string runtimeRoot,
+    IRecoveryReadinessProbe? probe = null,
+    RecoveryReadinessOptions? options = null)
+{
+    var contentRoot = Path.Combine(FindRepoRoot(), "src", "Hedgehog.LocalRuntime.Api");
+    return new WebApplicationFactory<LocalRuntimeApiAssemblyMarker>()
+        .WithWebHostBuilder(builder =>
+        {
+            builder.UseContentRoot(contentRoot);
+            builder.UseSetting("runtime-root", runtimeRoot);
+            builder.UseSetting("reset-runtime", "true");
+            builder.ConfigureTestServices(services =>
+            {
+                if (probe is not null)
+                {
+                    services.AddSingleton(probe);
+                }
+
+                if (options is not null)
+                {
+                    services.AddSingleton(options);
+                }
+            });
+        });
+}
+
+static IReadOnlyList<RecoveryGateProbeResult> AllPassedGates() =>
+    RecoveryReadinessEvaluator.CanonicalGateNames
+        .Select(name => new RecoveryGateProbeResult(name, RecoveryReadinessEvaluator.Passed, "test_passed"))
+        .ToArray();
+
+static void AssertCanonicalGates(RecoveryReadinessDto recovery)
+{
+    Equal(RecoveryReadinessEvaluator.SchemaVersion, recovery.SchemaVersion);
+    Equal(
+        string.Join(",", RecoveryReadinessEvaluator.CanonicalGateNames),
+        string.Join(",", recovery.Gates.Select(gate => gate.Name)));
 }
 
 static string FindRepoRoot()
@@ -178,5 +307,42 @@ static void True(bool condition, string message)
     if (!condition)
     {
         throw new InvalidOperationException(message);
+    }
+}
+
+static void False(bool condition, string message)
+{
+    if (condition)
+    {
+        throw new InvalidOperationException(message);
+    }
+}
+
+internal sealed class StaticRecoveryReadinessProbe(IReadOnlyList<RecoveryGateProbeResult> gates) : IRecoveryReadinessProbe
+{
+    public Task<RecoveryReadinessProbeSnapshot> EvaluateAsync(CancellationToken cancellationToken) =>
+        Task.FromResult(new RecoveryReadinessProbeSnapshot(
+            new RecoveryOperationalSummaryDto(
+                MetadataAvailable: true,
+                TenantCount: 1,
+                RunningHeads: 2,
+                TotalHeads: 2,
+                RunningStorageNodes: 3,
+                TotalStorageNodes: 3),
+            gates));
+}
+
+internal sealed class ThrowingRecoveryReadinessProbe : IRecoveryReadinessProbe
+{
+    public Task<RecoveryReadinessProbeSnapshot> EvaluateAsync(CancellationToken cancellationToken) =>
+        throw new InvalidOperationException("boom C:\\secret\\metadata\\hedgehog.sqlite");
+}
+
+internal sealed class SlowRecoveryReadinessProbe : IRecoveryReadinessProbe
+{
+    public async Task<RecoveryReadinessProbeSnapshot> EvaluateAsync(CancellationToken cancellationToken)
+    {
+        await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        throw new InvalidOperationException("unreachable");
     }
 }
