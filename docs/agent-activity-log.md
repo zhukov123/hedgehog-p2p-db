@@ -18,7 +18,7 @@
   - `docker compose -f observability/docker-compose.yml config`
 - Container coverage: Docker was present; compose syntax/config was validated. The product runtime distributed coverage came from the local multi-head/multi-storage-node smoke, stress, and restore drill harnesses because the checked-in compose stack currently covers observability services rather than the full Hedgehog runtime.
 - Severus: direct configured-agent routing failed with `agent not found`, no visible Severus sessions were listed, and Boromir posted the sidecar request in Discord `#agentchat` message `1528992461299388530`. Severus replied in auto-thread `1528992461299388530`, with concrete review messages `1528992924690550816` and `1528997817660735508`; those replies focused on concurrent manifest-reconciliation side work rather than this SQLite recovery-gate branch, so no Severus code edits or SQLite-specific review were incorporated here.
-- PR: pending.
+- PR: https://github.com/zhukov123/hedgehog-p2p-db/pull/31
 - Next candidate task: wire persisted recovery-gate outcomes into the admin/recovery API surface or implement `revoke_actor_or_node` in the SQLite workflow store.
 
 ## 2026-07-13 - claim outbox workflow
