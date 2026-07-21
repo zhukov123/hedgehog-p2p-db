@@ -29,6 +29,7 @@ await RemainingWorkflowSetPersistsCoherentMetadataAsync(connection);
 await ClaimOutboxClaimsEligibleEventsAsync(connection);
 await CapacityReportRejectsInvalidAccountingAsync(connection);
 await ExpireReservationRejectsEarlyExpiryAsync(connection);
+await InvariantAndRepairReadinessQueriesSurfaceOperationalGapsAsync(connection);
 await AssertForeignKeyCheckCleanAsync(connection);
 
 Console.WriteLine("Hedgehog.Metadata.Sqlite.Tests passed.");
@@ -505,6 +506,144 @@ static async Task ExpireReservationRejectsEarlyExpiryAsync(SqliteConnection conn
     Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM replicas WHERE replica_id = 'replica-d' AND state = 'planned';"));
 }
 
+static async Task InvariantAndRepairReadinessQueriesSurfaceOperationalGapsAsync(SqliteConnection connection)
+{
+    var inspector = SqliteMetadataAuthority.CreateInspector();
+    var now = new DateTimeOffset(2026, 1, 2, 8, 9, 10, TimeSpan.Zero).ToUnixTimeMilliseconds();
+
+    await ExecuteAsync(
+        connection,
+        """
+        UPDATE nodes
+        SET used_bytes = 900000,
+            reserved_bytes = 200000,
+            free_bytes = 1
+        WHERE node_id = 'node-b';
+
+        INSERT INTO objects (
+            object_id,
+            tenant_id,
+            dataset_id,
+            object_lookup_hash,
+            lookup_key_id,
+            current_version_id,
+            state,
+            placement_epoch,
+            delete_epoch,
+            created_at_ms,
+            updated_at_ms
+        )
+        VALUES (
+            'object-repair',
+            'tenant-a',
+            'dataset-a',
+            X'11223344',
+            'lookup-key-a',
+            'version-repair',
+            'active',
+            1,
+            0,
+            @now_ms,
+            @now_ms
+        );
+
+        INSERT INTO object_versions (
+            version_id,
+            object_id,
+            version_no,
+            state,
+            content_hash,
+            size_bytes,
+            encryption_alg,
+            data_key_id,
+            placement_epoch,
+            delete_epoch,
+            required_replica_count,
+            committed_at_ms,
+            created_at_ms,
+            updated_at_ms
+        )
+        VALUES (
+            'version-repair',
+            'object-repair',
+            1,
+            'committed',
+            X'AABBCCDD',
+            64,
+            'xchacha20-poly1305',
+            'data-key-a',
+            1,
+            0,
+            2,
+            @now_ms,
+            @now_ms,
+            @now_ms
+        );
+
+        INSERT INTO replicas (
+            replica_id,
+            version_id,
+            node_id,
+            state,
+            placement_epoch,
+            delete_epoch,
+            fencing_token,
+            byte_count,
+            hash_confirmed,
+            created_at_ms,
+            updated_at_ms
+        )
+        VALUES
+            ('replica-repair-healthy', 'version-repair', 'node-a', 'healthy', 1, 0, 501, 64, 1, @now_ms, @now_ms),
+            ('replica-repair-corrupt', 'version-repair', 'node-b', 'corrupt', 1, 0, 502, 64, 0, @now_ms, @now_ms);
+
+        INSERT INTO repair_jobs (
+            job_id,
+            version_id,
+            replica_id,
+            kind,
+            priority,
+            state,
+            not_before_ms,
+            idempotency_key,
+            created_at_ms,
+            updated_at_ms
+        )
+        VALUES (
+            'repair-active-under-replicated',
+            'version-repair',
+            NULL,
+            'under_replicated',
+            100,
+            'pending',
+            @now_ms,
+            'idem-repair-active-under-replicated',
+            @now_ms,
+            @now_ms
+        );
+        """,
+        ("@now_ms", now));
+
+    var violations = await inspector.CheckInvariantsAsync(connection);
+    ContainsViolation(violations, "committed_version_below_replica_quorum", "version-repair");
+    ContainsViolation(violations, "node_capacity_accounting_invalid", "node-b");
+
+    var candidates = await inspector.ListRepairReadinessAsync(connection);
+    var underReplicated = candidates.Single(candidate =>
+        candidate.VersionId == "version-repair" &&
+        candidate.Kind == "under_replicated");
+    Equal(2, underReplicated.RequiredReplicaCount);
+    Equal(1, underReplicated.HealthyReplicaCount);
+    Equal(true, underReplicated.HasActiveRepairJob);
+
+    var corruptReplica = candidates.Single(candidate =>
+        candidate.ReplicaId == "replica-repair-corrupt" &&
+        candidate.Kind == "missing_replace");
+    Equal(false, corruptReplica.HasActiveRepairJob);
+    Equal("tenant-a", corruptReplica.TenantId);
+    Equal("dataset-a", corruptReplica.DatasetId);
+}
+
 static async Task<int> ScalarIntAsync(SqliteConnection connection, string sql)
 {
     await using var command = connection.CreateCommand();
@@ -562,6 +701,19 @@ static void Equal<T>(T expected, T actual)
     if (!EqualityComparer<T>.Default.Equals(expected, actual))
     {
         throw new InvalidOperationException($"Expected '{expected}' but got '{actual}'.");
+    }
+}
+
+static void ContainsViolation(
+    IReadOnlyList<SqliteInvariantViolation> violations,
+    string code,
+    string entityId)
+{
+    if (!violations.Any(violation =>
+        string.Equals(violation.Code, code, StringComparison.Ordinal) &&
+        string.Equals(violation.EntityId, entityId, StringComparison.Ordinal)))
+    {
+        throw new InvalidOperationException($"Expected invariant violation '{code}' for '{entityId}'.");
     }
 }
 

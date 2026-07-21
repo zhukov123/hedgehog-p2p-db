@@ -18,4 +18,9 @@ public sealed class SqliteMetadataAuthority
     {
         return new SqliteMetadataWorkflowStore();
     }
+
+    public static ISqliteMetadataInspector CreateInspector()
+    {
+        return new SqliteMetadataInspector();
+    }
 }
