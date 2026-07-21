@@ -18,7 +18,7 @@
   - `dotnet format Hedgehog.sln --verify-no-changes`
 - Container coverage: Docker is available and the observability Compose file rendered successfully. The application still has local in-process multi-head/multi-storage-node drills rather than an app container stack; smoke, stress, and restore drills passed.
 - Severus: direct `sessions_send agentId: severus` failed with `agent not found`; Discord handoff posted in `#agentchat` at message `1528932606261854359`, auto-thread `1528932606261854359`. The visible thread replies concerned another recovery-readiness PR and did not contribute review for this branch.
-- PR: pending.
+- PR: https://github.com/zhukov123/hedgehog-p2p-db/pull/28
 - Next candidate task: wire the SQLite repair-readiness inspector into admin/health surfaces or repair-worker bootstrap so operators can see these findings without writing ad hoc SQL.
 
 ## 2026-07-13 - claim outbox workflow
