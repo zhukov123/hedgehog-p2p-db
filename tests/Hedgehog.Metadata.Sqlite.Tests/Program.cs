@@ -8,7 +8,7 @@ await connection.OpenAsync();
 var runner = SqliteMetadataAuthority.CreateMigrationRunner();
 await runner.ApplyMigrationsAsync(connection);
 
-Equal(6, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM __hedgehog_schema_migrations;"));
+Equal(7, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM __hedgehog_schema_migrations;"));
 Equal(Labels.AllGroups.SelectMany(group => group).Count(), await ScalarIntAsync(connection, "SELECT COUNT(*) FROM labels;"));
 Equal(13, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM workflow_definitions;"));
 Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM metadata_store WHERE store_id = 'default';"));
@@ -17,15 +17,17 @@ await AssertTableHasColumnsAsync(connection, "objects", "tenant_id", "dataset_id
 await AssertTableHasColumnsAsync(connection, "object_versions", "placement_epoch", "delete_epoch", "required_replica_count");
 await AssertTableHasColumnsAsync(connection, "replicas", "fencing_token", "placement_epoch", "delete_epoch");
 await AssertTableHasColumnsAsync(connection, "capacity_reservations", "reservation_class", "fencing_token", "bytes_reserved");
+await AssertTableHasColumnsAsync(connection, "recovery_gate_evaluations", "gate_name", "status", "reason", "evidence_count", "idempotency_key");
 await AssertForeignKeyCheckCleanAsync(connection);
 
 await runner.ApplyMigrationsAsync(connection);
-Equal(6, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM __hedgehog_schema_migrations;"));
+Equal(7, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM __hedgehog_schema_migrations;"));
 
 await SeedAuthorityAsync(connection);
 await WriteLifecyclePersistsCoherentMetadataAsync(connection);
 await DeleteMarkerPersistsTombstoneAsync(connection);
 await RemainingWorkflowSetPersistsCoherentMetadataAsync(connection);
+await RecoveryGateEvaluationPersistsFailClosedSnapshotAsync(connection);
 await ClaimOutboxClaimsEligibleEventsAsync(connection);
 await CapacityReportRejectsInvalidAccountingAsync(connection);
 await ExpireReservationRejectsEarlyExpiryAsync(connection);
@@ -335,6 +337,68 @@ static async Task RemainingWorkflowSetPersistsCoherentMetadataAsync(SqliteConnec
     Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM replicas WHERE replica_id = 'replica-c' AND state = 'delete_pending';"));
 }
 
+static async Task RecoveryGateEvaluationPersistsFailClosedSnapshotAsync(SqliteConnection connection)
+{
+    var workflowStore = SqliteMetadataAuthority.CreateWorkflowStore();
+    var now = new DateTimeOffset(2026, 1, 2, 5, 20, 0, TimeSpan.Zero);
+    await ExecuteAsync(
+        connection,
+        """
+        INSERT INTO outbox_events (
+            outbox_id,
+            workflow,
+            destination_node_id,
+            topic,
+            payload,
+            idempotency_key,
+            available_at_ms,
+            created_at_ms
+        )
+        VALUES (
+            'outbox-recovery-pending',
+            'evaluate_recovery_gate',
+            NULL,
+            'recovery.blocked',
+            X'01',
+            'idem-outbox-recovery-pending',
+            @now_ms,
+            @now_ms
+        );
+        """,
+        ("@now_ms", now.ToUnixTimeMilliseconds()));
+
+    var result = await workflowStore.EvaluateRecoveryGateAsync(
+        connection,
+        new SqliteEvaluateRecoveryGateRequest(
+            now,
+            "idem-recovery-gates-a",
+            "actor-a",
+            TimeSpan.FromMinutes(15)));
+
+    Equal(false, result.Ready);
+    Equal("not_ready", result.WorkflowResult.State);
+    Equal(9, result.Gates.Count);
+    Equal("passed", result.Gates.Single(gate => gate.GateName == "schema_migrations").Status);
+    Equal("passed", result.Gates.Single(gate => gate.GateName == "metadata_invariants").Status);
+    Equal("failed", result.Gates.Single(gate => gate.GateName == "outbox_reconciliation").Status);
+    Equal("failed", result.Gates.Single(gate => gate.GateName == "fresh_capacity_reports").Status);
+    Equal("unknown", result.Gates.Single(gate => gate.GateName == "manifest_reconciliation").Status);
+    Equal(9, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM recovery_gate_evaluations;"));
+    Equal("not_ready", await ScalarStringAsync(connection, "SELECT correlation_id FROM audit_events WHERE workflow = 'evaluate_recovery_gate';"));
+
+    var replay = await workflowStore.EvaluateRecoveryGateAsync(
+        connection,
+        new SqliteEvaluateRecoveryGateRequest(
+            now,
+            "idem-recovery-gates-a",
+            "actor-a",
+            TimeSpan.FromMinutes(15)));
+
+    Equal(true, replay.WorkflowResult.Replayed);
+    Equal(9, replay.Gates.Count);
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM audit_events WHERE workflow = 'evaluate_recovery_gate';"));
+}
+
 static async Task CapacityReportRejectsInvalidAccountingAsync(SqliteConnection connection)
 {
     var workflowStore = SqliteMetadataAuthority.CreateWorkflowStore();
@@ -511,6 +575,14 @@ static async Task<int> ScalarIntAsync(SqliteConnection connection, string sql)
     command.CommandText = sql;
     var value = await command.ExecuteScalarAsync();
     return Convert.ToInt32(value);
+}
+
+static async Task<string?> ScalarStringAsync(SqliteConnection connection, string sql)
+{
+    await using var command = connection.CreateCommand();
+    command.CommandText = sql;
+    var value = await command.ExecuteScalarAsync();
+    return value is null or DBNull ? null : Convert.ToString(value);
 }
 
 static async Task ExecuteAsync(SqliteConnection connection, string sql, params (string Name, object Value)[] parameters)
