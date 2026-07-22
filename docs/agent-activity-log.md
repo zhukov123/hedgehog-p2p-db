@@ -1,5 +1,22 @@
 # Agent Activity Log
 
+## 2026-07-22 - redact runtime status paths
+
+- Branch: `agent/redact-runtime-status-paths-2026-07-22`
+- Task: close issue #30 by removing local filesystem paths from the public `/runtime/status` response while keeping operator counts for tenants, heads, and storage nodes.
+- Tests:
+  - `dotnet run --project tests/Hedgehog.LocalRuntime.Tests/Hedgehog.LocalRuntime.Tests.csproj`
+  - `dotnet build Hedgehog.sln`
+  - `dotnet run --project tests/Hedgehog.Metadata.Core.Tests/Hedgehog.Metadata.Core.Tests.csproj`
+  - `dotnet run --project tests/Hedgehog.Metadata.Sqlite.Tests/Hedgehog.Metadata.Sqlite.Tests.csproj`
+  - `dotnet run --project tests/Hedgehog.Admin.Api.Tests/Hedgehog.Admin.Api.Tests.csproj`
+  - `dotnet run --project tools/Hedgehog.Xtask -- validate-scaffold-contract`
+  - `dotnet format Hedgehog.sln --verify-no-changes`
+- Container coverage: blocked because Docker Desktop's Linux engine was not running (`docker version` could not connect to `npipe:////./pipe/dockerDesktopLinuxEngine`). The local runtime test suite exercised the in-process multi-head, three-storage-node harness, stress scenario, restore drill, and API endpoints instead.
+- Severus: direct `sessions_send agentId: severus` failed with `agent not found`; shared Discord handoff sent in `#agentchat` as message/thread `1529354905964249128`. No actionable post-handoff reply was available when checked.
+- PR: pending
+- Next candidate task: resolve issue #29 by wiring admin recovery gates to the canonical readiness evaluator, after choosing the active recovery-gate PR to avoid duplicate work.
+
 ## 2026-07-13 - claim outbox workflow
 
 - Branch: `agent/claim-outbox-2026-07-13`
