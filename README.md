@@ -158,7 +158,7 @@ curl -fsS http://localhost:5090/health/ready
 curl -fsS http://localhost:5090/health/cluster
 ```
 
-`/health/ready` returns HTTP 200 only when metadata is queryable and all in-process heads and storage nodes are running. `/health/cluster` returns the same readiness contract with counts for tenants, heads, storage nodes, metadata availability, and the runtime paths.
+`/health/ready` returns HTTP 200 only when metadata is queryable and all in-process heads and storage nodes are running. Duplicate or malformed recovery probe output closes readiness instead of being silently accepted. `/health/cluster` returns the same readiness contract with counts for tenants, heads, storage nodes, metadata availability, and the runtime paths.
 
 ## Grafana Dashboard
 

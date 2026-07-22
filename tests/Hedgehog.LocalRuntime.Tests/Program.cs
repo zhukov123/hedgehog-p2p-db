@@ -25,6 +25,7 @@ try
     await RuntimeApiHealthEndpointsAsync(Path.Combine(runtimeRoot, "api-health"));
     await RuntimeApiHealthFailsClosedForUnknownGatesAsync(Path.Combine(runtimeRoot, "api-unknown"));
     await RuntimeApiHealthFailsClosedForFailedGateAsync(Path.Combine(runtimeRoot, "api-failed"));
+    await RuntimeApiHealthFailsClosedForDuplicateGateAsync(Path.Combine(runtimeRoot, "api-duplicate"));
     await RuntimeApiHealthFailsClosedForProbeExceptionAsync(Path.Combine(runtimeRoot, "api-exception"));
     await RuntimeApiHealthFailsClosedForProbeTimeoutAsync(Path.Combine(runtimeRoot, "api-timeout"));
 
@@ -183,6 +184,29 @@ static async Task RuntimeApiHealthFailsClosedForFailedGateAsync(string runtimeRo
     var failed = ready.Recovery.Gates.Single(gate => gate.Status == RecoveryReadinessEvaluator.Failed);
     Equal("audit_continuity", failed.Name);
     Equal("audit_gap", failed.Reason);
+
+    var metrics = await client.GetStringAsync("/metrics");
+    True(metrics.Contains("hedgehog_runtime_recovery_ready 0", StringComparison.Ordinal), "metrics should render the same not-ready decision");
+}
+
+static async Task RuntimeApiHealthFailsClosedForDuplicateGateAsync(string runtimeRoot)
+{
+    var gates = AllPassedGates()
+        .Concat([new RecoveryGateProbeResult("audit_continuity", RecoveryReadinessEvaluator.Failed, "audit_gap")])
+        .ToArray();
+    await using var app = CreateApi(runtimeRoot, new StaticRecoveryReadinessProbe(gates));
+    using var client = app.CreateClient();
+
+    var response = await client.GetAsync("/health/ready");
+    Equal(System.Net.HttpStatusCode.ServiceUnavailable, response.StatusCode);
+    var ready = await response.Content.ReadFromJsonAsync<HealthClusterDto>()
+        ?? throw new InvalidOperationException("duplicate-gate ready health endpoint returned no payload");
+    Equal(false, ready.Ready);
+    AssertCanonicalGates(ready.Recovery);
+    Equal(RecoveryReadinessEvaluator.CanonicalGateNames.Count, ready.Recovery.Gates.Count);
+    var duplicate = ready.Recovery.Gates.Single(gate => gate.Name == "audit_continuity");
+    Equal(RecoveryReadinessEvaluator.Unknown, duplicate.Status);
+    Equal("duplicate_gate_result", duplicate.Reason);
 
     var metrics = await client.GetStringAsync("/metrics");
     True(metrics.Contains("hedgehog_runtime_recovery_ready 0", StringComparison.Ordinal), "metrics should render the same not-ready decision");
