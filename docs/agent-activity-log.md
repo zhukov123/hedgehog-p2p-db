@@ -18,7 +18,7 @@
   - `dotnet run --project tools/Hedgehog.Xtask -- run-local-runtime-smoke`
 - Container coverage: blocked because Docker Desktop's Linux engine was not running (`open //./pipe/dockerDesktopLinuxEngine: The system cannot find the file specified`); local multi-head, three-storage-node smoke coverage passed instead.
 - Severus: direct `sessions_send agentId: severus` failed with `agent not found`; visible session search returned no Severus session; fallback Discord handoff was attempted in `#agentchat`, with visible auto-thread `1529354905964249128` and message `1529354905964249128`. No current-run concrete Severus review was available before PR prep.
-- PR: pending.
+- PR: https://github.com/zhukov123/hedgehog-p2p-db/pull/35
 - Next candidate task: make one currently `unknown` recovery gate actionable, starting with `manifest_reconciliation` or `cache_rebuild`, so recovery readiness can eventually reach `ready`.
 
 ## 2026-07-13 - claim outbox workflow
