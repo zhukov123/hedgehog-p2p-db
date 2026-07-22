@@ -317,7 +317,7 @@ public sealed class LocalHeadNode : IHeadNode
               AND o.dataset_id = @dataset_id
               AND o.object_lookup_hash = @object_lookup_hash
               AND o.state = 'active'
-              AND v.state = 'committed'
+              AND v.state IN ('committed', 'under_replicated')
             LIMIT 1;
             """;
         command.Parameters.AddWithValue("@tenant_id", options.TenantId);
@@ -359,6 +359,123 @@ public sealed class LocalHeadNode : IHeadNode
 
         return replicas;
     }
+
+    public async Task<ReplicaRepairReconciliationResult> ReconcileReplicaHealthAsync(
+        CancellationToken cancellationToken = default)
+    {
+        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            RequireRunning();
+            var candidates = await LoadReadableReplicaCandidatesAsync(cancellationToken).ConfigureAwait(false);
+            var failures = 0;
+            var repairJobs = 0;
+
+            foreach (var candidate in candidates)
+            {
+                var node = storageNodes.FirstOrDefault(item => item.NodeId == candidate.NodeId);
+                if (node is null)
+                {
+                    var result = await ReconcileReplicaFailureAsync(candidate, "missing", "storage_node_not_configured", cancellationToken)
+                        .ConfigureAwait(false);
+                    failures++;
+                    repairJobs += CountRepairJobsEnqueued(result);
+                    continue;
+                }
+
+                try
+                {
+                    await node.ReadReplicaAsync(
+                        new StorageReplicaRead(candidate.VersionId, candidate.ReplicaId, candidate.ContentHash),
+                        cancellationToken).ConfigureAwait(false);
+                }
+                catch (FileNotFoundException)
+                {
+                    var result = await ReconcileReplicaFailureAsync(candidate, "missing", "replica_blob_missing", cancellationToken)
+                        .ConfigureAwait(false);
+                    failures++;
+                    repairJobs += CountRepairJobsEnqueued(result);
+                }
+                catch (InvalidOperationException)
+                {
+                    var result = await ReconcileReplicaFailureAsync(candidate, "corrupt", "replica_hash_mismatch", cancellationToken)
+                        .ConfigureAwait(false);
+                    failures++;
+                    repairJobs += CountRepairJobsEnqueued(result);
+                }
+                catch (IOException)
+                {
+                    var result = await ReconcileReplicaFailureAsync(candidate, "unreadable", "replica_unreadable", cancellationToken)
+                        .ConfigureAwait(false);
+                    failures++;
+                    repairJobs += CountRepairJobsEnqueued(result);
+                }
+            }
+
+            return new ReplicaRepairReconciliationResult(candidates.Count, failures, repairJobs);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private async Task<IReadOnlyList<ReplicaRepairCandidate>> LoadReadableReplicaCandidatesAsync(
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT o.object_id, v.version_id, v.content_hash, r.replica_id, r.node_id
+            FROM objects o
+            JOIN object_versions v ON v.version_id = o.current_version_id
+            JOIN replicas r ON r.version_id = v.version_id
+            WHERE o.tenant_id = @tenant_id
+              AND o.dataset_id = @dataset_id
+              AND o.state = 'active'
+              AND v.state IN ('committed', 'under_replicated')
+              AND r.state = 'healthy'
+            ORDER BY v.created_at_ms, r.node_id, r.replica_id;
+            """;
+        command.Parameters.AddWithValue("@tenant_id", options.TenantId);
+        command.Parameters.AddWithValue("@dataset_id", options.DatasetId);
+
+        var candidates = new List<ReplicaRepairCandidate>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            candidates.Add(new ReplicaRepairCandidate(
+                reader.GetString(0),
+                reader.GetString(1),
+                (byte[])reader.GetValue(2),
+                reader.GetString(3),
+                reader.GetString(4)));
+        }
+
+        return candidates;
+    }
+
+    private static int CountRepairJobsEnqueued(SqliteWorkflowResult result) =>
+        result.OutboxTopics.Contains("repair.needed", StringComparer.Ordinal) ? 1 : 0;
+
+    private Task<SqliteWorkflowResult> ReconcileReplicaFailureAsync(
+        ReplicaRepairCandidate candidate,
+        string failureKind,
+        string reason,
+        CancellationToken cancellationToken) =>
+        workflowStore.ReconcileReplicaFailureAsync(
+            connection,
+            new SqliteReconcileReplicaFailureRequest(
+                options.TenantId,
+                options.DatasetId,
+                candidate.ObjectId,
+                candidate.VersionId,
+                candidate.ReplicaId,
+                candidate.NodeId,
+                failureKind,
+                reason,
+                DateTimeOffset.UtcNow,
+                $"reconcile:{candidate.VersionId}:{candidate.ReplicaId}:{failureKind}"),
+            cancellationToken);
 
     private async Task<long> NextVersionNoAsync(string objectId, CancellationToken cancellationToken)
     {
@@ -520,4 +637,11 @@ public sealed class LocalHeadNode : IHeadNode
     private sealed record CurrentVersionMetadata(string ObjectId, string VersionId, byte[] ContentHash);
 
     private sealed record ReplicaMetadata(string NodeId, string ReplicaId, long StoredBytes);
+
+    private sealed record ReplicaRepairCandidate(
+        string ObjectId,
+        string VersionId,
+        byte[] ContentHash,
+        string ReplicaId,
+        string NodeId);
 }

@@ -834,6 +834,200 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
         }
     }
 
+    public async Task<SqliteWorkflowResult> ReconcileReplicaFailureAsync(
+        IDbConnection connection,
+        SqliteReconcileReplicaFailureRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateReconcileReplicaFailure(request);
+        var db = RequireDbConnection(connection);
+        await EnsureOpenAsync(db, cancellationToken).ConfigureAwait(false);
+        await using var transaction = await db.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            var replay = await TryBeginIdempotencyAsync(
+                db,
+                transaction,
+                request.IdempotencyKey,
+                request.TenantId,
+                request.DatasetId,
+                MetadataWorkflowNames.ReconcileReplicaFailure,
+                actorId: null,
+                request,
+                request.DetectedAt,
+                cancellationToken).ConfigureAwait(false);
+
+            if (replay)
+            {
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                return new SqliteWorkflowResult(MetadataWorkflowNames.ReconcileReplicaFailure, "replayed", Replayed: true, []);
+            }
+
+            var nextReplicaState = string.Equals(request.FailureKind, "corrupt", StringComparison.Ordinal)
+                ? "corrupt"
+                : "suspect";
+            var repairKind = string.Equals(request.FailureKind, "missing", StringComparison.Ordinal)
+                ? "missing_replace"
+                : "suspect_verify";
+            var nowMs = ToUnixMs(request.DetectedAt);
+
+            var rows = await ExecuteAsync(
+                db,
+                transaction,
+                """
+                UPDATE replicas
+                SET state = @next_replica_state,
+                    hash_confirmed = CASE
+                        WHEN @next_replica_state = 'corrupt' THEN 0
+                        ELSE hash_confirmed
+                    END,
+                    updated_at_ms = @detected_at_ms
+                WHERE replica_id = @replica_id
+                  AND version_id = @version_id
+                  AND node_id = @node_id
+                  AND state = 'healthy'
+                  AND EXISTS (
+                      SELECT 1
+                      FROM object_versions v
+                      JOIN objects o ON o.object_id = v.object_id
+                      WHERE v.version_id = replicas.version_id
+                        AND v.object_id = @object_id
+                        AND v.state IN ('committed', 'under_replicated')
+                        AND o.tenant_id = @tenant_id
+                        AND o.dataset_id = @dataset_id
+                        AND o.state = 'active'
+                  );
+                """,
+                cancellationToken,
+                ("@next_replica_state", nextReplicaState),
+                ("@detected_at_ms", nowMs),
+                ("@replica_id", request.ReplicaId),
+                ("@version_id", request.VersionId),
+                ("@node_id", request.NodeId),
+                ("@object_id", request.ObjectId),
+                ("@tenant_id", request.TenantId),
+                ("@dataset_id", request.DatasetId)).ConfigureAwait(false);
+
+            if (rows != 1)
+            {
+                throw new InvalidOperationException("Replica failure reconciliation did not match a healthy committed replica.");
+            }
+
+            var requiredReplicas = await ScalarLongAsync(
+                db,
+                transaction,
+                "SELECT required_replica_count FROM object_versions WHERE version_id = @version_id AND object_id = @object_id;",
+                cancellationToken,
+                ("@version_id", request.VersionId),
+                ("@object_id", request.ObjectId)).ConfigureAwait(false)
+                ?? throw new InvalidOperationException("Object version was not found.");
+
+            var healthyReplicas = await ScalarLongAsync(
+                db,
+                transaction,
+                "SELECT COUNT(*) FROM replicas WHERE version_id = @version_id AND state = 'healthy';",
+                cancellationToken,
+                ("@version_id", request.VersionId)).ConfigureAwait(false) ?? 0;
+
+            var outboxTopics = new List<string>();
+            var resultState = nextReplicaState;
+            if (healthyReplicas < requiredReplicas)
+            {
+                var repairJobRows = await ExecuteAsync(
+                    db,
+                    transaction,
+                    """
+                    UPDATE object_versions
+                    SET state = 'under_replicated',
+                        updated_at_ms = @detected_at_ms
+                    WHERE version_id = @version_id
+                      AND object_id = @object_id
+                      AND state = 'committed';
+                    """,
+                    cancellationToken,
+                    ("@detected_at_ms", nowMs),
+                    ("@version_id", request.VersionId),
+                    ("@object_id", request.ObjectId)).ConfigureAwait(false);
+
+                await ExecuteAsync(
+                    db,
+                    transaction,
+                    """
+                    INSERT INTO repair_jobs (
+                        job_id,
+                        version_id,
+                        replica_id,
+                        kind,
+                        priority,
+                        state,
+                        attempt_count,
+                        lease_id,
+                        not_before_ms,
+                        last_error,
+                        idempotency_key,
+                        created_at_ms,
+                        updated_at_ms
+                    )
+                    VALUES (
+                        @job_id,
+                        @version_id,
+                        @replica_id,
+                        @kind,
+                        @priority,
+                        'pending',
+                        0,
+                        NULL,
+                        @not_before_ms,
+                        @last_error,
+                        @idempotency_key,
+                        @created_at_ms,
+                        @created_at_ms
+                    )
+                    ON CONFLICT DO NOTHING;
+                    """,
+                    cancellationToken,
+                    ("@job_id", $"repair_{request.VersionId}_{repairKind}"),
+                    ("@version_id", request.VersionId),
+                    ("@replica_id", request.ReplicaId),
+                    ("@kind", repairKind),
+                    ("@priority", 100),
+                    ("@not_before_ms", nowMs),
+                    ("@last_error", request.Reason),
+                    ("@idempotency_key", request.IdempotencyKey),
+                    ("@created_at_ms", nowMs)).ConfigureAwait(false);
+
+                resultState = "under_replicated";
+                if (repairJobRows > 0)
+                {
+                    outboxTopics.Add("repair.needed");
+                }
+            }
+
+            await AppendAuditAsync(
+                db,
+                transaction,
+                MetadataWorkflowNames.ReconcileReplicaFailure,
+                "allowed",
+                actorId: null,
+                request.ObjectId,
+                request.VersionId,
+                request.IdempotencyKey,
+                request.DetectedAt,
+                cancellationToken).ConfigureAwait(false);
+
+            await CompleteIdempotencyAsync(db, transaction, request.IdempotencyKey, request.DetectedAt, cancellationToken)
+                .ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return new SqliteWorkflowResult(MetadataWorkflowNames.ReconcileReplicaFailure, resultState, Replayed: false, outboxTopics);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
+    }
+
     public async Task<SqliteWorkflowResult> ExpireReservationAsync(
         IDbConnection connection,
         SqliteExpireReservationRequest request,
@@ -1584,6 +1778,23 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
         RequireText(request.Reason, nameof(request.Reason));
         RequirePositive(request.LeaseDuration, nameof(request.LeaseDuration));
         RequireText(request.IdempotencyKey, nameof(request.IdempotencyKey));
+    }
+
+    private static void ValidateReconcileReplicaFailure(SqliteReconcileReplicaFailureRequest request)
+    {
+        RequireText(request.TenantId, nameof(request.TenantId));
+        RequireText(request.DatasetId, nameof(request.DatasetId));
+        RequireText(request.ObjectId, nameof(request.ObjectId));
+        RequireText(request.VersionId, nameof(request.VersionId));
+        RequireText(request.ReplicaId, nameof(request.ReplicaId));
+        RequireText(request.NodeId, nameof(request.NodeId));
+        RequireText(request.FailureKind, nameof(request.FailureKind));
+        RequireText(request.Reason, nameof(request.Reason));
+        RequireText(request.IdempotencyKey, nameof(request.IdempotencyKey));
+        if (request.FailureKind is not ("missing" or "corrupt" or "unreadable"))
+        {
+            throw new ArgumentOutOfRangeException(nameof(request.FailureKind), request.FailureKind, "Failure kind must be missing, corrupt, or unreadable.");
+        }
     }
 
     private static void ValidateExpireReservation(SqliteExpireReservationRequest request)

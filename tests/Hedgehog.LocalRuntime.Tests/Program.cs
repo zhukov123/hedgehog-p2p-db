@@ -1,3 +1,4 @@
+using Hedgehog.Agent.Core;
 using Hedgehog.LocalRuntime;
 using Hedgehog.LocalRuntime.Api;
 using Microsoft.AspNetCore.Hosting;
@@ -20,6 +21,7 @@ try
     Equal(6, result.HealthyReplicaRows);
 
     await MultiTenantIsolationAndDeleteAsync(Path.Combine(runtimeRoot, "isolation"));
+    await RepairReconciliationEnqueuesMissingReplicaAsync(Path.Combine(runtimeRoot, "repair-reconcile"));
     await StressScenarioAsync(Path.Combine(runtimeRoot, "stress"));
     await RestoreDrillAsync(Path.Combine(runtimeRoot, "restore"));
     await RuntimeApiHealthEndpointsAsync(Path.Combine(runtimeRoot, "api-health"));
@@ -37,6 +39,38 @@ finally
     {
         Directory.Delete(runtimeRoot, recursive: true);
     }
+}
+
+static async Task RepairReconciliationEnqueuesMissingReplicaAsync(string runtimeRoot)
+{
+    await using var cluster = new LocalCluster(LocalClusterOptions.CreateDefault(runtimeRoot));
+    await cluster.StartAsync();
+
+    var writer = cluster.CreateClient("repair-writer");
+    var put = await writer.PutTextAsync("repair/missing-replica.txt", "still readable after one failed replica");
+    Equal(3, put.ReplicaCount);
+
+    var targetNode = cluster.StorageNodes[0];
+    var targetSnapshot = await targetNode.SnapshotAsync();
+    var targetReplica = targetSnapshot.Replicas.Single(replica => replica.VersionId == put.VersionId);
+    await targetNode.DeleteReplicaAsync(new StorageReplicaDelete(targetReplica.VersionId, targetReplica.ReplicaId));
+
+    var reconciliation = await cluster.ReconcileReplicaHealthAsync();
+    Equal(3, reconciliation.ReplicasChecked);
+    Equal(1, reconciliation.ReplicaFailuresDetected);
+    Equal(1, reconciliation.RepairJobsEnqueued);
+    Equal(1, await cluster.ScalarLongAsync("SELECT COUNT(*) FROM replicas WHERE version_id = @version_id AND replica_id = @replica_id AND state = 'suspect';", default, ("@version_id", put.VersionId), ("@replica_id", targetReplica.ReplicaId)));
+    Equal(1, await cluster.ScalarLongAsync("SELECT COUNT(*) FROM object_versions WHERE version_id = @version_id AND state = 'under_replicated';", default, ("@version_id", put.VersionId)));
+    Equal(1, await cluster.ScalarLongAsync("SELECT COUNT(*) FROM repair_jobs WHERE version_id = @version_id AND kind = 'missing_replace' AND state = 'pending';", default, ("@version_id", put.VersionId)));
+
+    var reader = cluster.CreateClient("repair-reader", preferLastHead: true);
+    Equal("still readable after one failed replica", await reader.GetTextAsync("repair/missing-replica.txt"));
+
+    var repeated = await cluster.ReconcileReplicaHealthAsync();
+    Equal(2, repeated.ReplicasChecked);
+    Equal(0, repeated.ReplicaFailuresDetected);
+    Equal(0, repeated.RepairJobsEnqueued);
+    Equal(1, await cluster.ScalarLongAsync("SELECT COUNT(*) FROM repair_jobs WHERE version_id = @version_id AND kind = 'missing_replace';", default, ("@version_id", put.VersionId)));
 }
 
 static async Task RestoreDrillAsync(string runtimeRoot)
