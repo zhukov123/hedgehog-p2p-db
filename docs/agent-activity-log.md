@@ -16,7 +16,7 @@
   - `dotnet run --project tools/Hedgehog.Xtask -- run-local-restore-drill`
   - `dotnet format Hedgehog.sln --verify-no-changes`
 - Container coverage: `docker --version` and `docker compose -f observability/docker-compose.yml config` passed. The repo still has observability containers rather than a containerized app harness, so distributed behavior was covered by the local multi-head/multi-storage-node smoke, stress, restore, and repair reconciliation tests.
-- PR: pending
+- PR: https://github.com/zhukov123/hedgehog-p2p-db/pull/37
 - Next candidate task: implement the repair worker path that copies from a surviving healthy replica and restores the required replica count.
 
 ## 2026-07-13 - claim outbox workflow
