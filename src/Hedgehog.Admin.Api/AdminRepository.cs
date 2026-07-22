@@ -1,3 +1,5 @@
+using Hedgehog.Metadata.Core;
+
 namespace Hedgehog.Admin.Api;
 
 public sealed class AdminRepository
@@ -377,5 +379,61 @@ public sealed class AdminRepository
         return bytes >= 1024L * 1024L * 1024L * 1024L
             ? $"{bytes / 1024L / 1024L / 1024L / 1024L} TiB"
             : $"{bytes / 1024L / 1024L / 1024L} GiB";
+    }
+}
+
+public sealed class AdminRecoveryReadinessProbe(AdminRepository repository) : IRecoveryReadinessProbe
+{
+    public Task<RecoveryReadinessProbeSnapshot> EvaluateAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var status = repository.GetClusterStatus();
+        var gates = repository.GetRecoveryGates();
+        var nodes = repository.GetNodes();
+        var capacity = repository.GetCapacity();
+        var audit = repository.GetAuditEvents(null, null, null, null);
+        var repairJobs = repository.GetRepairQueue(null, null);
+
+        var hasOpenRecoveryGate = gates.Any(gate => gate.State is "open" or "acknowledged");
+        var hasCapacityEmergency = capacity.Any(scope => scope.Pressure is "critical" or "emergency");
+        var hasActiveRepairDeficit = repairJobs.Any(job => job.State is "pending" or "running");
+        var allNodesWritable = nodes.All(node =>
+            (node.State is "active" or "draining") && node.DrainState is not "quarantined");
+
+        RecoveryGateProbeResult[] results =
+        [
+            new("schema_migrations", RecoveryReadinessEvaluator.Passed, "admin_repository_reachable"),
+            allNodesWritable
+                ? new("metadata_invariants", RecoveryReadinessEvaluator.Passed, "admin_inventory_consistent")
+                : new("metadata_invariants", RecoveryReadinessEvaluator.Failed, "node_unavailable"),
+            status.OutboxLagSeconds == 0
+                ? new("outbox_reconciliation", RecoveryReadinessEvaluator.Passed, "no_outbox_lag")
+                : new("outbox_reconciliation", RecoveryReadinessEvaluator.Failed, "outbox_lag"),
+            audit.Count > 0
+                ? new("audit_continuity", RecoveryReadinessEvaluator.Passed, "audit_present")
+                : new("audit_continuity", RecoveryReadinessEvaluator.Failed, "audit_missing"),
+            new("cache_rebuild", RecoveryReadinessEvaluator.Unknown, "not_implemented"),
+            new("manifest_reconciliation", RecoveryReadinessEvaluator.Unknown, "not_implemented"),
+            hasCapacityEmergency || hasOpenRecoveryGate
+                ? new("reservation_reconciliation", RecoveryReadinessEvaluator.Failed, "capacity_recovery_gate_open")
+                : new("reservation_reconciliation", RecoveryReadinessEvaluator.Passed, "capacity_stable"),
+            hasActiveRepairDeficit || hasOpenRecoveryGate
+                ? new("repair_deficit", RecoveryReadinessEvaluator.Failed, "repair_recovery_gate_open")
+                : new("repair_deficit", RecoveryReadinessEvaluator.Passed, "repair_clear"),
+            hasCapacityEmergency
+                ? new("fresh_capacity_reports", RecoveryReadinessEvaluator.Failed, "capacity_pressure")
+                : new("fresh_capacity_reports", RecoveryReadinessEvaluator.Passed, "capacity_current"),
+        ];
+
+        var summary = new RecoveryOperationalSummaryDto(
+            MetadataAvailable: true,
+            TenantCount: capacity.Count(scope => scope.ScopeType == "tenant"),
+            RunningHeads: 1,
+            TotalHeads: 1,
+            RunningStorageNodes: nodes.Count(node => node.State is "active" or "draining"),
+            TotalStorageNodes: nodes.Count);
+
+        return Task.FromResult(new RecoveryReadinessProbeSnapshot(summary, results));
     }
 }

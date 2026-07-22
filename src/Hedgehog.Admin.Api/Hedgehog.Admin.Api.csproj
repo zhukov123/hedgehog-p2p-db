@@ -1,2 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
+  <ItemGroup>
+    <ProjectReference Include="../Hedgehog.Metadata.Core/Hedgehog.Metadata.Core.csproj" />
+  </ItemGroup>
 </Project>

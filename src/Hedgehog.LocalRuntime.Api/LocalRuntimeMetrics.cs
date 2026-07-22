@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text;
 using Hedgehog.LocalRuntime;
-using Hedgehog.LocalRuntime.Api;
+using Hedgehog.Metadata.Core;
 
 internal sealed class LocalRuntimeMetrics
 {

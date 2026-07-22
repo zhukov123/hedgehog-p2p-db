@@ -178,21 +178,22 @@ async function loadRepair() {
 }
 
 async function loadGates() {
-  const gates = await getJson("/recovery/gates");
+  const recovery = await getJson("/recovery/gates");
+  const gates = Array.isArray(recovery) ? recovery : recovery.gates;
   renderRows("#gates-body", gates, gate => `
     <tr>
-      <td>${escapeHtml(gate.name)}<br><span class="mono muted">${escapeHtml(gate.gateId)}</span></td>
-      <td>${pill(gate.state)}</td>
-      <td>${pill(gate.severity)}</td>
+      <td>${escapeHtml(gate.name)}<br><span class="mono muted">${escapeHtml(gate.gateId || gate.name)}</span></td>
+      <td>${pill(gate.state || gate.status)}</td>
+      <td>${pill(gate.severity || recoveryStatusSeverity(gate.status))}</td>
       <td>${escapeHtml(gate.reason)}</td>
-      <td>${gate.approvals}/${gate.requiredApprovals}</td>
-      <td>${gate.blocks.map(escapeHtml).join("<br>")}</td>
-      <td>${gate.allowedActions.map(escapeHtml).join("<br>")}</td>
-      <td>${actions([
+      <td>${gate.approvals === undefined ? "-" : `${gate.approvals}/${gate.requiredApprovals}`}</td>
+      <td>${(gate.blocks || []).map(escapeHtml).join("<br>") || "-"}</td>
+      <td>${(gate.allowedActions || []).map(escapeHtml).join("<br>") || "-"}</td>
+      <td>${gate.gateId ? actions([
         ["Approve", `recovery-gate:approve:${gate.gateId}`],
         ["Close", `recovery-gate:close:${gate.gateId}`],
         ["Export", `recovery-gate:export-evidence:${gate.gateId}`]
-      ])}</td>
+      ]) : ""}</td>
     </tr>`);
 }
 
@@ -278,6 +279,16 @@ function metric(label, value) {
 function pill(value) {
   const normalized = String(value).toLowerCase();
   return `<span class="pill ${escapeHtml(normalized)}">${escapeHtml(value)}</span>`;
+}
+
+function recoveryStatusSeverity(status) {
+  if (status === "failed") {
+    return "critical";
+  }
+  if (status === "unknown") {
+    return "warning";
+  }
+  return "normal";
 }
 
 function bytes(value) {
