@@ -43,6 +43,10 @@ static async Task RestoreDrillAsync(string runtimeRoot)
 {
     var result = await LocalRuntimeRestoreDrill.RunAsync(LocalClusterOptions.CreateDefault(runtimeRoot));
 
+    Equal(runtimeRoot, result.RuntimeRoot);
+    Equal($"{runtimeRoot}-backup", result.BackupRoot);
+    Equal($"{runtimeRoot}-restored", result.RestoredRuntimeRoot);
+    Equal(true, result.SourceRuntimeRootRemoved);
     Equal(2, result.HeadCountAfterRestore);
     Equal(3, result.StorageNodeCountAfterRestore);
     Equal(1, result.ReadsVerifiedAfterRestore);
@@ -55,7 +59,7 @@ static async Task RestoreDrillAsync(string runtimeRoot)
     Equal(1, result.PendingOutboxRows);
     Equal(1, result.PendingRepairJobRows);
     True(result.AuditRows >= 7, "restore drill should preserve workflow audit rows");
-    Equal(7, result.BackupManifestEntries);
+    Equal(10, result.BackupManifestEntries);
     Equal(true, result.MissingReplicaBlobRejected);
     Equal(true, result.CorruptReplicaBlobRejected);
 }

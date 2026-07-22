@@ -4,6 +4,9 @@ namespace Hedgehog.LocalRuntime;
 
 public sealed record LocalRuntimeRestoreDrillResult(
     string RuntimeRoot,
+    string BackupRoot,
+    string RestoredRuntimeRoot,
+    bool SourceRuntimeRootRemoved,
     int HeadCountAfterRestore,
     int StorageNodeCountAfterRestore,
     int ObjectsRecovered,
@@ -34,6 +37,11 @@ public static class LocalRuntimeRestoreDrill
         var liveObjectText = "restore drill live payload";
         var deletedObjectText = "restore drill deleted payload";
         var metadataPath = Path.Combine(options.RuntimeRoot, "metadata", "hedgehog.sqlite");
+        var backupRoot = $"{options.RuntimeRoot}-backup";
+        var restoredRuntimeRoot = $"{options.RuntimeRoot}-restored";
+
+        await DeleteDirectoryIfExistsAsync(backupRoot, cancellationToken).ConfigureAwait(false);
+        await DeleteDirectoryIfExistsAsync(restoredRuntimeRoot, cancellationToken).ConfigureAwait(false);
 
         await using (var cluster = new LocalCluster(options))
         {
@@ -51,7 +59,6 @@ public static class LocalRuntimeRestoreDrill
                 cancellationToken).ConfigureAwait(false);
         }
 
-        var backupRoot = Path.Combine(options.RuntimeRoot, "backups", "restore-drill");
         var backupManifest = await LocalRuntimeBackup.CreateAsync(
             options.RuntimeRoot,
             backupRoot,
@@ -64,7 +71,20 @@ public static class LocalRuntimeRestoreDrill
             backupRoot,
             cancellationToken).ConfigureAwait(false);
 
-        await using var restored = new LocalCluster(options);
+        SqliteConnection.ClearAllPools();
+        await DeleteDirectoryIfExistsAsync(options.RuntimeRoot, cancellationToken).ConfigureAwait(false);
+        var sourceRuntimeRootRemoved = !Directory.Exists(options.RuntimeRoot);
+        if (!sourceRuntimeRootRemoved)
+        {
+            throw new InvalidOperationException("Restore drill could not remove the source runtime root before restore.");
+        }
+
+        await LocalRuntimeBackup.RestoreAsync(backupRoot, restoredRuntimeRoot, cancellationToken)
+            .ConfigureAwait(false);
+
+        var restoredOptions = options with { RuntimeRoot = restoredRuntimeRoot };
+        var restoredMetadataPath = Path.Combine(restoredOptions.RuntimeRoot, "metadata", "hedgehog.sqlite");
+        await using var restored = new LocalCluster(restoredOptions);
         await restored.StartAsync(cancellationToken).ConfigureAwait(false);
 
         var snapshot = await restored.SnapshotAsync(cancellationToken).ConfigureAwait(false);
@@ -104,7 +124,7 @@ public static class LocalRuntimeRestoreDrill
             "SELECT COUNT(*) FROM audit_events;",
             cancellationToken).ConfigureAwait(false);
         var healthyReplicasVerified = await VerifyHealthyReplicasAsync(
-            metadataPath,
+            restoredMetadataPath,
             snapshot,
             cancellationToken).ConfigureAwait(false);
 
@@ -130,6 +150,9 @@ public static class LocalRuntimeRestoreDrill
 
         return new LocalRuntimeRestoreDrillResult(
             options.RuntimeRoot,
+            backupRoot,
+            restoredRuntimeRoot,
+            sourceRuntimeRootRemoved,
             snapshot.Heads.Count,
             snapshot.StorageNodes.Count,
             ObjectsRecovered: (int)objectRows,
@@ -146,6 +169,39 @@ public static class LocalRuntimeRestoreDrill
             backupManifest.Entries.Count,
             missingReplicaBlobRejected,
             corruptReplicaBlobRejected);
+    }
+
+    private static async Task DeleteDirectoryIfExistsAsync(string path, CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!Directory.Exists(path))
+            {
+                return;
+            }
+
+            try
+            {
+                Directory.Delete(path, recursive: true);
+                return;
+            }
+            catch (IOException) when (attempt < 4)
+            {
+                SqliteConnection.ClearAllPools();
+                await Task.Delay(TimeSpan.FromMilliseconds(100), cancellationToken).ConfigureAwait(false);
+            }
+            catch (UnauthorizedAccessException) when (attempt < 4)
+            {
+                SqliteConnection.ClearAllPools();
+                await Task.Delay(TimeSpan.FromMilliseconds(100), cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        if (Directory.Exists(path))
+        {
+            Directory.Delete(path, recursive: true);
+        }
     }
 
     private static async Task<bool> ValidateMissingReplicaBlobIsRejectedAsync(
