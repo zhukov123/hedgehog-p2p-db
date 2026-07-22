@@ -85,6 +85,7 @@ Admin is not a later dashboard. For v1, admin status, repair visibility, audit r
 - [ ] Add invariant queries and repair-readiness checks.
   - [x] Guard capacity reports against unknown pressure labels, impossible byte accounting, and missing nodes.
   - [x] Guard reservation expiry against premature expiry before the reservation TTL.
+  - [x] Evaluate local runtime recovery gates for manifest reconciliation, reservation reconciliation, repair deficits, and fresh capacity reports.
 
 ## Milestone 4: Head Service
 

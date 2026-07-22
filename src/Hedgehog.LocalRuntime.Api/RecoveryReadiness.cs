@@ -5,6 +5,8 @@ namespace Hedgehog.LocalRuntime.Api;
 public sealed class RecoveryReadinessOptions
 {
     public TimeSpan EvaluationTimeout { get; init; } = TimeSpan.FromSeconds(2);
+
+    public TimeSpan CapacityReportFreshness { get; init; } = TimeSpan.FromMinutes(5);
 }
 
 public interface IRecoveryReadinessProbe
@@ -143,7 +145,9 @@ public sealed class RecoveryReadinessEvaluator(
     }
 }
 
-internal sealed class LocalRuntimeRecoveryReadinessProbe(LocalCluster runtime) : IRecoveryReadinessProbe
+internal sealed class LocalRuntimeRecoveryReadinessProbe(
+    LocalCluster runtime,
+    RecoveryReadinessOptions options) : IRecoveryReadinessProbe
 {
     public async Task<RecoveryReadinessProbeSnapshot> EvaluateAsync(CancellationToken cancellationToken)
     {
@@ -157,10 +161,67 @@ internal sealed class LocalRuntimeRecoveryReadinessProbe(LocalCluster runtime) :
         var pendingOutbox = await runtime.ScalarLongAsync(
             "SELECT COUNT(*) FROM outbox_events WHERE delivered_at_ms IS NULL;",
             cancellationToken).ConfigureAwait(false);
+        var now = DateTimeOffset.UtcNow;
+        var nowMs = now.ToUnixTimeMilliseconds();
+        var staleActiveReservations = await runtime.ScalarLongAsync(
+            """
+            SELECT COUNT(*)
+            FROM capacity_reservations
+            WHERE state IN ('pending', 'reserved', 'streaming', 'finalizing')
+              AND expires_at_ms <= @now_ms;
+            """,
+            cancellationToken,
+            ("@now_ms", nowMs)).ConfigureAwait(false);
+        var committedReservationGaps = await runtime.ScalarLongAsync(
+            """
+            SELECT COUNT(*)
+            FROM capacity_reservations cr
+            LEFT JOIN replicas r ON r.replica_id = cr.replica_id
+            WHERE cr.state = 'committed'
+              AND (r.replica_id IS NULL OR r.state <> 'healthy');
+            """,
+            cancellationToken).ConfigureAwait(false);
+        var repairDeficits = await runtime.ScalarLongAsync(
+            """
+            SELECT COUNT(*)
+            FROM object_versions v
+            WHERE v.state = 'committed'
+              AND (
+                  SELECT COUNT(*)
+                  FROM replicas r
+                  WHERE r.version_id = v.version_id
+                    AND r.state = 'healthy'
+              ) < v.required_replica_count;
+            """,
+            cancellationToken).ConfigureAwait(false);
+        var activeRepairJobs = await runtime.ScalarLongAsync(
+            """
+            SELECT COUNT(*)
+            FROM repair_jobs
+            WHERE state IN ('pending', 'leased', 'running', 'verifying', 'retry_wait');
+            """,
+            cancellationToken).ConfigureAwait(false);
+        var freshCapacityCutoffMs = now.Subtract(options.CapacityReportFreshness).ToUnixTimeMilliseconds();
+        var missingFreshCapacityReports = await runtime.ScalarLongAsync(
+            """
+            SELECT COUNT(*)
+            FROM nodes n
+            WHERE n.state = 'active'
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM capacity_reports c
+                  WHERE c.node_id = n.node_id
+                    AND c.observed_at_ms >= @fresh_cutoff_ms
+              );
+            """,
+            cancellationToken,
+            ("@fresh_cutoff_ms", freshCapacityCutoffMs)).ConfigureAwait(false);
 
         var allHeadsRunning = snapshot.Heads.All(head => head.IsRunning);
         var allStorageRunning = snapshot.StorageNodes.All(node => node.IsRunning);
         var storageCapacityValid = snapshot.StorageNodes.All(node => node.FreeBytes >= 0);
+        var manifestReconciled = await ManifestReconciledAsync(runtime, snapshot, cancellationToken)
+            .ConfigureAwait(false);
         var operationalSummary = new RecoveryOperationalSummaryDto(
             MetadataAvailable: true,
             TenantCount: checked((int)tenantCount),
@@ -182,12 +243,68 @@ internal sealed class LocalRuntimeRecoveryReadinessProbe(LocalCluster runtime) :
                 ? new("audit_continuity", RecoveryReadinessEvaluator.Passed, "audit_present")
                 : new("audit_continuity", RecoveryReadinessEvaluator.Failed, "audit_missing"),
             new("cache_rebuild", RecoveryReadinessEvaluator.Unknown, "not_implemented"),
-            new("manifest_reconciliation", RecoveryReadinessEvaluator.Unknown, "not_implemented"),
-            new("reservation_reconciliation", RecoveryReadinessEvaluator.Unknown, "not_implemented"),
-            new("repair_deficit", RecoveryReadinessEvaluator.Unknown, "not_implemented"),
-            new("fresh_capacity_reports", RecoveryReadinessEvaluator.Unknown, "not_implemented"),
+            manifestReconciled
+                ? new("manifest_reconciliation", RecoveryReadinessEvaluator.Passed, "storage_manifests_match_metadata")
+                : new("manifest_reconciliation", RecoveryReadinessEvaluator.Failed, "storage_manifest_drift"),
+            staleActiveReservations == 0 && committedReservationGaps == 0
+                ? new("reservation_reconciliation", RecoveryReadinessEvaluator.Passed, "reservations_reconciled")
+                : new("reservation_reconciliation", RecoveryReadinessEvaluator.Failed, "reservation_drift"),
+            repairDeficits == 0 && activeRepairJobs == 0
+                ? new("repair_deficit", RecoveryReadinessEvaluator.Passed, "no_active_repair_deficit")
+                : new("repair_deficit", RecoveryReadinessEvaluator.Failed, "repair_work_pending"),
+            missingFreshCapacityReports == 0
+                ? new("fresh_capacity_reports", RecoveryReadinessEvaluator.Passed, "capacity_reports_fresh")
+                : new("fresh_capacity_reports", RecoveryReadinessEvaluator.Failed, "capacity_reports_stale"),
         ];
 
         return new RecoveryReadinessProbeSnapshot(operationalSummary, gates);
+    }
+
+    private static async Task<bool> ManifestReconciledAsync(
+        LocalCluster runtime,
+        LocalClusterSnapshot snapshot,
+        CancellationToken cancellationToken)
+    {
+        foreach (var node in snapshot.StorageNodes)
+        {
+            var healthyMetadataReplicas = await runtime.ScalarLongAsync(
+                """
+                SELECT COUNT(*)
+                FROM replicas
+                WHERE node_id = @node_id
+                  AND state = 'healthy';
+                """,
+                cancellationToken,
+                ("@node_id", node.NodeId)).ConfigureAwait(false);
+            if (healthyMetadataReplicas != node.Replicas.Count)
+            {
+                return false;
+            }
+
+            foreach (var replica in node.Replicas)
+            {
+                var metadataMatch = await runtime.ScalarLongAsync(
+                    """
+                    SELECT COUNT(*)
+                    FROM replicas
+                    WHERE node_id = @node_id
+                      AND version_id = @version_id
+                      AND replica_id = @replica_id
+                      AND state = 'healthy'
+                      AND byte_count = @stored_bytes;
+                    """,
+                    cancellationToken,
+                    ("@node_id", node.NodeId),
+                    ("@version_id", replica.VersionId),
+                    ("@replica_id", replica.ReplicaId),
+                    ("@stored_bytes", replica.StoredBytes)).ConfigureAwait(false);
+                if (metadataMatch != 1)
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
     }
 }

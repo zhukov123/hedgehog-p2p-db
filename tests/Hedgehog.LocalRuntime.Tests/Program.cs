@@ -159,10 +159,12 @@ static async Task RuntimeApiHealthFailsClosedForUnknownGatesAsync(string runtime
     Equal(false, ready.Ready);
     Equal("not_ready", ready.Status);
     AssertCanonicalGates(ready.Recovery);
-    True(ready.Recovery.Gates.Any(gate => gate.Name == "manifest_reconciliation" && gate.Status == RecoveryReadinessEvaluator.Unknown), "manifest reconciliation should remain unknown until implemented");
-    True(ready.Recovery.Gates.Any(gate => gate.Name == "reservation_reconciliation" && gate.Status == RecoveryReadinessEvaluator.Unknown), "reservation reconciliation should remain unknown until implemented");
-    True(ready.Recovery.Gates.Any(gate => gate.Name == "repair_deficit" && gate.Status == RecoveryReadinessEvaluator.Unknown), "repair deficit should remain unknown until implemented");
-    True(ready.Recovery.Gates.Any(gate => gate.Name == "fresh_capacity_reports" && gate.Status == RecoveryReadinessEvaluator.Unknown), "fresh capacity reports should remain unknown until implemented");
+    Equal(RecoveryReadinessEvaluator.Passed, Gate(ready.Recovery, "audit_continuity").Status);
+    Equal(RecoveryReadinessEvaluator.Unknown, Gate(ready.Recovery, "cache_rebuild").Status);
+    Equal(RecoveryReadinessEvaluator.Passed, Gate(ready.Recovery, "manifest_reconciliation").Status);
+    Equal(RecoveryReadinessEvaluator.Passed, Gate(ready.Recovery, "reservation_reconciliation").Status);
+    Equal(RecoveryReadinessEvaluator.Passed, Gate(ready.Recovery, "repair_deficit").Status);
+    Equal(RecoveryReadinessEvaluator.Passed, Gate(ready.Recovery, "fresh_capacity_reports").Status);
 }
 
 static async Task RuntimeApiHealthFailsClosedForFailedGateAsync(string runtimeRoot)
@@ -264,6 +266,9 @@ static void AssertCanonicalGates(RecoveryReadinessDto recovery)
         string.Join(",", RecoveryReadinessEvaluator.CanonicalGateNames),
         string.Join(",", recovery.Gates.Select(gate => gate.Name)));
 }
+
+static RecoveryGateOutcomeDto Gate(RecoveryReadinessDto recovery, string name) =>
+    recovery.Gates.Single(gate => gate.Name == name);
 
 static string FindRepoRoot()
 {

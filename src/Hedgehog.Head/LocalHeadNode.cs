@@ -432,6 +432,7 @@ public sealed class LocalHeadNode : IHeadNode
 
         foreach (var node in storageNodes)
         {
+            var snapshot = await node.SnapshotAsync(cancellationToken).ConfigureAwait(false);
             await ExecuteAsync(
                 """
                 INSERT INTO nodes (
@@ -465,9 +466,39 @@ public sealed class LocalHeadNode : IHeadNode
                 cancellationToken,
                 ("@node_id", node.NodeId),
                 ("@tenant_id", options.TenantId),
-                ("@capacity_bytes", (await node.SnapshotAsync(cancellationToken).ConfigureAwait(false)).CapacityBytes),
+                ("@capacity_bytes", snapshot.CapacityBytes),
                 ("@now_ms", now)).ConfigureAwait(false);
+
+            await workflowStore.RecordCapacityReportAsync(
+                connection,
+                new SqliteCapacityReportRequest(
+                    node.NodeId,
+                    CapacityPressure(snapshot),
+                    snapshot.CapacityBytes,
+                    snapshot.UsedBytes,
+                    ReservedBytes: 0,
+                    snapshot.FreeBytes,
+                    DateTimeOffset.FromUnixTimeMilliseconds(now),
+                    $"capacity:{options.HeadId}:{node.NodeId}:{now}"),
+                cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    private static string CapacityPressure(StorageAgentSnapshot snapshot)
+    {
+        if (snapshot.CapacityBytes <= 0)
+        {
+            return "emergency";
+        }
+
+        var freeRatio = (double)snapshot.FreeBytes / snapshot.CapacityBytes;
+        return freeRatio switch
+        {
+            < 0.05 => "emergency",
+            < 0.10 => "critical",
+            < 0.20 => "pressure",
+            _ => "normal",
+        };
     }
 
     private async Task EnsureOpenAsync(CancellationToken cancellationToken)
