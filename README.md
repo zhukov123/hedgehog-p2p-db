@@ -158,7 +158,7 @@ curl -fsS http://localhost:5090/health/ready
 curl -fsS http://localhost:5090/health/cluster
 ```
 
-`/health/ready` returns HTTP 200 only when metadata is queryable and all in-process heads and storage nodes are running. `/health/cluster` returns the same readiness contract with counts for tenants, heads, storage nodes, metadata availability, and the runtime paths.
+`/health/ready` returns HTTP 200 only when metadata is queryable, every canonical recovery gate passes, and all in-process heads and storage nodes are running. The local runtime currently evaluates metadata invariants, outbox reconciliation, audit continuity, storage manifest reconciliation, reservation reconciliation, active repair deficits, and fresh capacity reports. Gates that are not implemented yet are reported as `unknown`, which keeps readiness closed. `/health/cluster` returns the same readiness contract with tenant, head, storage, metadata, and gate counts without exposing runtime file paths.
 
 ## Grafana Dashboard
 
