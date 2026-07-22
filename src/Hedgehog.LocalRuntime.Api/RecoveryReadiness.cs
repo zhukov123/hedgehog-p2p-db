@@ -88,17 +88,28 @@ public sealed class RecoveryReadinessEvaluator(
             .GroupBy(item => item.Name, StringComparer.Ordinal)
             .ToDictionary(
                 group => group.Key,
-                group => group.First(),
+                group => group.ToArray(),
                 StringComparer.Ordinal);
 
         var gates = CanonicalGateNames
-            .Select(name => byName.TryGetValue(name, out var result)
-                ? new RecoveryGateOutcomeDto(name, NormalizeStatus(result.Status), SanitizeReason(result.Reason))
+            .Select(name => byName.TryGetValue(name, out var results)
+                ? NormalizeGate(name, results)
                 : new RecoveryGateOutcomeDto(name, Unknown, "not_implemented"))
             .ToArray();
         var ready = gates.All(gate => gate.Status == Passed);
 
         return new RecoveryReadinessDto(SchemaVersion, evaluatedAt, ready, probed.OperationalSummary, gates);
+    }
+
+    private static RecoveryGateOutcomeDto NormalizeGate(string name, IReadOnlyList<RecoveryGateProbeResult> results)
+    {
+        if (results.Count != 1)
+        {
+            return new RecoveryGateOutcomeDto(name, Unknown, "duplicate_gate_result");
+        }
+
+        var result = results[0];
+        return new RecoveryGateOutcomeDto(name, NormalizeStatus(result.Status), SanitizeReason(result.Reason));
     }
 
     private static RecoveryReadinessDto BuildUnknown(string reason, DateTimeOffset evaluatedAt)

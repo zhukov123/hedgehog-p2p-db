@@ -2,6 +2,7 @@ using System.Data;
 using System.Data.Common;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Hedgehog.Metadata.Core;
 using Hedgehog.Types;
 
@@ -9,6 +10,13 @@ namespace Hedgehog.Metadata.Sqlite;
 
 public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
 {
+    private const string RecoveryReadinessSchemaVersion = "recovery-readiness.v1";
+    private const string GatePassed = "passed";
+    private const string GateFailed = "failed";
+    private const string GateUnknown = "unknown";
+
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
     public async Task<SqliteWorkflowResult> CreateWriteIntentAsync(
         IDbConnection connection,
         SqliteCreateWriteIntentRequest request,
@@ -1200,6 +1208,80 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
         }
     }
 
+    public async Task<SqliteRecoveryGateEvaluation> EvaluateRecoveryGateAsync(
+        IDbConnection connection,
+        SqliteEvaluateRecoveryGateRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateEvaluateRecoveryGate(request);
+        var db = RequireDbConnection(connection);
+        await EnsureOpenAsync(db, cancellationToken).ConfigureAwait(false);
+        await using var transaction = await db.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            var replay = await TryBeginIdempotencyAsync(
+                db,
+                transaction,
+                request.IdempotencyKey,
+                tenantId: null,
+                datasetId: null,
+                MetadataWorkflowNames.EvaluateRecoveryGate,
+                request.ActorId,
+                request,
+                request.EvaluatedAt,
+                cancellationToken).ConfigureAwait(false);
+
+            if (replay)
+            {
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                var replayed = await LoadRecoveryMetadataAsync(db, request.IdempotencyKey, cancellationToken)
+                    .ConfigureAwait(false);
+                return replayed ?? BuildUnknownRecoveryEvaluation(request.EvaluatedAt, "replayed_snapshot_missing");
+            }
+
+            var evaluation = await BuildRecoveryEvaluationAsync(db, transaction, request, cancellationToken)
+                .ConfigureAwait(false);
+            var metadata = JsonSerializer.Serialize(evaluation, JsonOptions);
+
+            await ExecuteAsync(
+                db,
+                transaction,
+                """
+                UPDATE metadata_store
+                SET updated_at_ms = @updated_at_ms,
+                    degraded_mode = @degraded_mode,
+                    metadata = @metadata
+                WHERE store_id = 'default';
+                """,
+                cancellationToken,
+                ("@updated_at_ms", ToUnixMs(request.EvaluatedAt)),
+                ("@degraded_mode", evaluation.Ready ? "normal" : "recovering"),
+                ("@metadata", metadata)).ConfigureAwait(false);
+
+            await AppendAuthorityAuditAsync(
+                db,
+                transaction,
+                MetadataWorkflowNames.EvaluateRecoveryGate,
+                evaluation.Ready ? "allowed" : "failed",
+                request.ActorId,
+                request.IdempotencyKey,
+                Encoding.UTF8.GetBytes(metadata),
+                request.EvaluatedAt,
+                cancellationToken).ConfigureAwait(false);
+
+            await CompleteIdempotencyAsync(db, transaction, request.IdempotencyKey, request.EvaluatedAt, cancellationToken)
+                .ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return evaluation;
+        }
+        catch
+        {
+            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
+    }
+
     private static async Task<IReadOnlyList<SqliteClaimedOutboxEvent>> ClaimOutboxRowsAsync(
         DbConnection connection,
         DbTransaction transaction,
@@ -1270,6 +1352,205 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
         }
 
         return events;
+    }
+
+    private static async Task<SqliteRecoveryGateEvaluation> BuildRecoveryEvaluationAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        SqliteEvaluateRecoveryGateRequest request,
+        CancellationToken cancellationToken)
+    {
+        var nowMs = ToUnixMs(request.EvaluatedAt);
+        var freshAfterMs = ToUnixMs(request.EvaluatedAt.Subtract(request.FreshCapacityWindow));
+        var migrationCount = await ScalarLongAsync(
+            connection,
+            transaction,
+            "SELECT COUNT(*) FROM __hedgehog_schema_migrations;",
+            cancellationToken).ConfigureAwait(false) ?? 0;
+        var expectedWorkflowCount = await ScalarLongAsync(
+            connection,
+            transaction,
+            "SELECT COUNT(*) FROM workflow_definitions WHERE name = @workflow;",
+            cancellationToken,
+            ("@workflow", MetadataWorkflowNames.EvaluateRecoveryGate)).ConfigureAwait(false) ?? 0;
+        var metadataStoreCount = await CountAsync(connection, transaction, "metadata_store", "store_id = 'default'", cancellationToken)
+            .ConfigureAwait(false);
+        var tenantCount = await CountAsync(connection, transaction, "tenants", "state = 'active'", cancellationToken)
+            .ConfigureAwait(false);
+        var datasetCount = await CountAsync(connection, transaction, "datasets", "state = 'active'", cancellationToken)
+            .ConfigureAwait(false);
+        var activeNodeCount = await CountAsync(connection, transaction, "nodes", "state = 'active'", cancellationToken)
+            .ConfigureAwait(false);
+        var pendingOutboxCount = await CountAsync(connection, transaction, "outbox_events", "delivered_at_ms IS NULL", cancellationToken)
+            .ConfigureAwait(false);
+        var auditCount = await CountAsync(connection, transaction, "audit_events", "1 = 1", cancellationToken)
+            .ConfigureAwait(false);
+        var staleReservationCount = await CountAsync(
+            connection,
+            transaction,
+            "capacity_reservations",
+            "state = 'failed_cleanup_required' OR (state IN ('reserved', 'streaming', 'finalizing') AND expires_at_ms <= @now_ms)",
+            cancellationToken,
+            ("@now_ms", nowMs)).ConfigureAwait(false);
+        var activeRepairJobCount = await CountAsync(
+            connection,
+            transaction,
+            "repair_jobs",
+            "state IN ('pending', 'leased', 'running', 'verifying', 'retry_wait')",
+            cancellationToken).ConfigureAwait(false);
+        var freshCapacityReportCount = await CountAsync(
+            connection,
+            transaction,
+            "nodes",
+            """
+            state = 'active'
+            AND EXISTS (
+                SELECT 1
+                FROM capacity_reports
+                WHERE capacity_reports.node_id = nodes.node_id
+                  AND observed_at_ms >= @fresh_after_ms
+            )
+            """,
+            cancellationToken,
+            ("@fresh_after_ms", freshAfterMs)).ConfigureAwait(false);
+        var capacityAccountingViolations = await CountAsync(
+            connection,
+            transaction,
+            "nodes",
+            "used_bytes + reserved_bytes > capacity_bytes OR free_bytes > capacity_bytes - used_bytes - reserved_bytes",
+            cancellationToken).ConfigureAwait(false);
+        var foreignKeyViolations = await CountForeignKeyViolationsAsync(connection, transaction, cancellationToken)
+            .ConfigureAwait(false);
+
+        var summary = new SqliteRecoveryOperationalSummary(
+            MetadataAvailable: metadataStoreCount == 1,
+            TenantCount: checked((int)tenantCount),
+            ActiveDatasetCount: checked((int)datasetCount),
+            ActiveNodeCount: checked((int)activeNodeCount),
+            PendingOutboxCount: checked((int)pendingOutboxCount),
+            ActiveRepairJobCount: checked((int)activeRepairJobCount),
+            StaleReservationCount: checked((int)staleReservationCount),
+            FreshCapacityReportCount: checked((int)freshCapacityReportCount));
+
+        SqliteRecoveryGateOutcome[] gates =
+        [
+            migrationCount >= 6 && expectedWorkflowCount == 1
+                ? new("schema_migrations", GatePassed, "metadata_schema_current")
+                : new("schema_migrations", GateFailed, "metadata_schema_incomplete"),
+            metadataStoreCount == 1
+                && tenantCount > 0
+                && datasetCount > 0
+                && activeNodeCount > 0
+                && foreignKeyViolations == 0
+                && capacityAccountingViolations == 0
+                ? new("metadata_invariants", GatePassed, "authority_invariants_clean")
+                : new("metadata_invariants", GateFailed, "authority_invariants_failed"),
+            pendingOutboxCount == 0
+                ? new("outbox_reconciliation", GatePassed, "no_pending_outbox")
+                : new("outbox_reconciliation", GateFailed, "pending_outbox"),
+            auditCount > 0
+                ? new("audit_continuity", GatePassed, "audit_present")
+                : new("audit_continuity", GateFailed, "audit_missing"),
+            new("cache_rebuild", GateUnknown, "not_implemented"),
+            new("manifest_reconciliation", GateUnknown, "not_implemented"),
+            staleReservationCount == 0
+                ? new("reservation_reconciliation", GatePassed, "reservations_current")
+                : new("reservation_reconciliation", GateFailed, "stale_reservations"),
+            activeRepairJobCount == 0
+                ? new("repair_deficit", GatePassed, "no_active_repairs")
+                : new("repair_deficit", GateFailed, "active_repairs"),
+            activeNodeCount > 0 && freshCapacityReportCount == activeNodeCount
+                ? new("fresh_capacity_reports", GatePassed, "active_nodes_recent")
+                : new("fresh_capacity_reports", GateFailed, "stale_capacity_reports"),
+        ];
+        var ready = gates.All(gate => gate.Status == GatePassed);
+
+        return new SqliteRecoveryGateEvaluation(
+            RecoveryReadinessSchemaVersion,
+            request.EvaluatedAt,
+            ready,
+            summary,
+            gates);
+    }
+
+    private static SqliteRecoveryGateEvaluation BuildUnknownRecoveryEvaluation(DateTimeOffset evaluatedAt, string reason)
+    {
+        SqliteRecoveryGateOutcome[] gates =
+        [
+            new("schema_migrations", GateUnknown, reason),
+            new("metadata_invariants", GateUnknown, reason),
+            new("outbox_reconciliation", GateUnknown, reason),
+            new("audit_continuity", GateUnknown, reason),
+            new("cache_rebuild", GateUnknown, reason),
+            new("manifest_reconciliation", GateUnknown, reason),
+            new("reservation_reconciliation", GateUnknown, reason),
+            new("repair_deficit", GateUnknown, reason),
+            new("fresh_capacity_reports", GateUnknown, reason),
+        ];
+
+        return new SqliteRecoveryGateEvaluation(
+            RecoveryReadinessSchemaVersion,
+            evaluatedAt,
+            Ready: false,
+            new SqliteRecoveryOperationalSummary(false, 0, 0, 0, 0, 0, 0, 0),
+            gates);
+    }
+
+    private static async Task<SqliteRecoveryGateEvaluation?> LoadRecoveryMetadataAsync(
+        DbConnection connection,
+        string idempotencyKey,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            """
+            SELECT encrypted_details
+            FROM audit_events
+            WHERE workflow = @workflow
+              AND idempotency_key = @idempotency_key;
+            """;
+        AddParameters(
+            command,
+            ("@workflow", MetadataWorkflowNames.EvaluateRecoveryGate),
+            ("@idempotency_key", idempotencyKey));
+        var value = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        return value is byte[] { Length: > 0 } bytes
+            ? JsonSerializer.Deserialize<SqliteRecoveryGateEvaluation>(bytes, JsonOptions)
+            : null;
+    }
+
+    private static async Task<long> CountForeignKeyViolationsAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "PRAGMA foreign_key_check;";
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        long violations = 0;
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            violations++;
+        }
+
+        return violations;
+    }
+
+    private static async Task<long> CountAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        string tableName,
+        string where,
+        CancellationToken cancellationToken,
+        params (string Name, object? Value)[] parameters)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = $"SELECT COUNT(*) FROM {tableName} WHERE {where};";
+        AddParameters(command, parameters);
+        var value = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        return Convert.ToInt64(value);
     }
 
     private static async Task<bool> TryBeginIdempotencyAsync(
@@ -1427,6 +1708,45 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
             ("@decision", decision),
             ("@node_id", nodeId),
             ("@idempotency_key", idempotencyKey),
+            ("@occurred_at_ms", ToUnixMs(occurredAt)));
+
+    private static Task AppendAuthorityAuditAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        string workflow,
+        string decision,
+        string actorId,
+        string idempotencyKey,
+        byte[] details,
+        DateTimeOffset occurredAt,
+        CancellationToken cancellationToken) =>
+        ExecuteAsync(
+            connection,
+            transaction,
+            """
+            INSERT INTO audit_events (
+                workflow,
+                decision,
+                actor_id,
+                idempotency_key,
+                encrypted_details,
+                occurred_at_ms
+            )
+            VALUES (
+                @workflow,
+                @decision,
+                @actor_id,
+                @idempotency_key,
+                @encrypted_details,
+                @occurred_at_ms
+            );
+            """,
+            cancellationToken,
+            ("@workflow", workflow),
+            ("@decision", decision),
+            ("@actor_id", actorId),
+            ("@idempotency_key", idempotencyKey),
+            ("@encrypted_details", details),
             ("@occurred_at_ms", ToUnixMs(occurredAt)));
 
     private static async Task<int> ExecuteAsync(
@@ -1618,6 +1938,13 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
         RequireText(request.IdempotencyKey, nameof(request.IdempotencyKey));
         RequireKnownLabel(Labels.CapacityPressureStates, request.CapacityPressure, nameof(request.CapacityPressure));
         RequireCapacityAccounting(request);
+    }
+
+    private static void ValidateEvaluateRecoveryGate(SqliteEvaluateRecoveryGateRequest request)
+    {
+        RequireText(request.ActorId, nameof(request.ActorId));
+        RequirePositive(request.FreshCapacityWindow, nameof(request.FreshCapacityWindow));
+        RequireText(request.IdempotencyKey, nameof(request.IdempotencyKey));
     }
 
     private static void ValidateClaimOutbox(SqliteClaimOutboxRequest request)

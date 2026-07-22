@@ -115,6 +115,34 @@ public sealed record SqliteCapacityReportRequest(
     string IdempotencyKey,
     byte[]? RawReport = null);
 
+public sealed record SqliteEvaluateRecoveryGateRequest(
+    string ActorId,
+    DateTimeOffset EvaluatedAt,
+    TimeSpan FreshCapacityWindow,
+    string IdempotencyKey);
+
+public sealed record SqliteRecoveryOperationalSummary(
+    bool MetadataAvailable,
+    int TenantCount,
+    int ActiveDatasetCount,
+    int ActiveNodeCount,
+    int PendingOutboxCount,
+    int ActiveRepairJobCount,
+    int StaleReservationCount,
+    int FreshCapacityReportCount);
+
+public sealed record SqliteRecoveryGateOutcome(
+    string Name,
+    string Status,
+    string Reason);
+
+public sealed record SqliteRecoveryGateEvaluation(
+    string SchemaVersion,
+    DateTimeOffset EvaluatedAt,
+    bool Ready,
+    SqliteRecoveryOperationalSummary OperationalSummary,
+    IReadOnlyList<SqliteRecoveryGateOutcome> Gates);
+
 public sealed record SqliteClaimOutboxRequest(
     string ClaimedBy,
     DateTimeOffset ClaimedAt,
@@ -185,6 +213,11 @@ public interface ISqliteMetadataWorkflowStore
     Task<SqliteWorkflowResult> RecordCapacityReportAsync(
         IDbConnection connection,
         SqliteCapacityReportRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<SqliteRecoveryGateEvaluation> EvaluateRecoveryGateAsync(
+        IDbConnection connection,
+        SqliteEvaluateRecoveryGateRequest request,
         CancellationToken cancellationToken = default);
 
     Task<SqliteClaimOutboxResult> ClaimOutboxAsync(
