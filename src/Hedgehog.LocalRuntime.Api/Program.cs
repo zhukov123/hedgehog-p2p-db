@@ -3,6 +3,7 @@ using Hedgehog.Client;
 using Hedgehog.Head;
 using Hedgehog.LocalRuntime;
 using Hedgehog.LocalRuntime.Api;
+using Hedgehog.Metadata.Core;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddCors(options =>

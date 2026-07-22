@@ -33,6 +33,20 @@ dotnet run --project src/Hedgehog.Admin.Ui/Hedgehog.Admin.Ui.csproj --urls http:
 - `GET /admin/v1/recovery/gates`
 - `POST /admin/v1/recovery/gates/{gateId}/actions/{action}`
 
+`GET /admin/v1/recovery/gates` returns the shared `recovery-readiness.v1` evaluator payload used by the local runtime `/health/ready`, `/health/cluster`, and `/metrics` surfaces. The response includes `ready`, `operationalSummary`, and canonical gate outcomes for:
+
+- `schema_migrations`
+- `metadata_invariants`
+- `outbox_reconciliation`
+- `audit_continuity`
+- `cache_rebuild`
+- `manifest_reconciliation`
+- `reservation_reconciliation`
+- `repair_deficit`
+- `fresh_capacity_reports`
+
+Admin recovery readiness is fail-closed: any `failed` or `unknown` canonical gate makes `ready` false, and evaluator failures return bounded `unknown` reasons instead of exception details or runtime filesystem paths.
+
 ## Operator Workflows
 
 - Cluster status: inspect head health, metadata health, outbox lag, write mode, repair backlog, and capacity pressure; pause writes, resume writes, enter read-only mode, or trigger a health sweep.
@@ -40,5 +54,5 @@ dotnet run --project src/Hedgehog.Admin.Ui/Hedgehog.Admin.Ui.csproj --urls http:
 - Capacity: compare physical, usable, committed, reserved, effective free, and emergency reserve bytes by global, tenant, and node scope; freeze or resume writes and trigger cleanup.
 - Objects: filter by tenant, dataset, state, opaque object id, version, or lookup hash prefix; force repair, mark suspect, block GC, or unblock GC.
 - Repair queue: sort and filter active work by state and priority; boost priority, retry failed jobs, or cancel safe duplicate jobs.
-- Recovery gates: see open operational blocks and allowed recovery actions; approve, close, or export evidence.
+- Recovery gates: see canonical recovery readiness outcomes from the same evaluator contract as runtime health and metrics; approve, close, or export evidence for the backing admin gate records while unresolved failed or unknown gates keep recovery not ready.
 - Audit: query actor, action, target type, result, request id, reason, and redacted metadata for operator action trails.

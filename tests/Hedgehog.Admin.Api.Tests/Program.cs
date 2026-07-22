@@ -1,8 +1,11 @@
 using Hedgehog.Admin.Api;
+using Hedgehog.Metadata.Core;
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
 
 var repository = new AdminRepository();
 
@@ -143,9 +146,13 @@ static async Task AdminEndpointsServeOperationalContractsAsync()
         ?? throw new InvalidOperationException("audit endpoint returned no payload");
     True(audit.Count > 0, "audit endpoint should expose audit events");
 
-    var gates = await client.GetFromJsonAsync<IReadOnlyList<RecoveryGateDto>>("/admin/v1/recovery/gates")
+    var recovery = await client.GetFromJsonAsync<RecoveryReadinessDto>("/admin/v1/recovery/gates")
         ?? throw new InvalidOperationException("recovery gates endpoint returned no payload");
-    True(gates.Count > 0, "recovery gates endpoint should expose recovery gates");
+    AssertCanonicalGates(recovery);
+    Equal(false, recovery.Ready);
+    True(recovery.Gates.Any(gate => gate.Status == RecoveryReadinessEvaluator.Failed), "admin recovery should fail closed while sample risks remain open");
+
+    await AdminRecoveryEndpointUsesSharedEvaluatorContractAsync(contentRoot);
 
     var actionResponse = await client.PostAsJsonAsync(
         "/admin/v1/cluster/actions/pause-writes",
@@ -186,6 +193,30 @@ static async Task AdminEndpointsServeOperationalContractsAsync()
     Equal("paused", paused.WriteMode);
 }
 
+static async Task AdminRecoveryEndpointUsesSharedEvaluatorContractAsync(string contentRoot)
+{
+    await using var app = new WebApplicationFactory<AdminApiAssemblyMarker>()
+        .WithWebHostBuilder(builder =>
+        {
+            builder.UseContentRoot(contentRoot);
+            builder.ConfigureTestServices(services =>
+            {
+                services.AddSingleton<IRecoveryReadinessProbe>(new StaticRecoveryReadinessProbe(AllPassedGates()));
+            });
+        });
+    using var client = app.CreateClient();
+
+    var recovery = await client.GetFromJsonAsync<RecoveryReadinessDto>("/admin/v1/recovery/gates")
+        ?? throw new InvalidOperationException("override recovery gates endpoint returned no payload");
+    AssertCanonicalGates(recovery);
+    Equal(true, recovery.Ready);
+    True(recovery.Gates.All(gate => gate.Status == RecoveryReadinessEvaluator.Passed), "admin endpoint should use the same evaluator contract as health and metrics");
+
+    var payload = await client.GetStringAsync("/admin/v1/recovery/gates");
+    False(payload.Contains("C:\\", StringComparison.Ordinal), "admin recovery should not expose Windows paths");
+    False(payload.Contains(".sqlite", StringComparison.OrdinalIgnoreCase), "admin recovery should not expose database paths");
+}
+
 static string FindRepoRoot()
 {
     var directory = new DirectoryInfo(AppContext.BaseDirectory);
@@ -202,6 +233,19 @@ static string FindRepoRoot()
     throw new InvalidOperationException("Could not find repository root containing Hedgehog.sln.");
 }
 
+static IReadOnlyList<RecoveryGateProbeResult> AllPassedGates() =>
+    RecoveryReadinessEvaluator.CanonicalGateNames
+        .Select(name => new RecoveryGateProbeResult(name, RecoveryReadinessEvaluator.Passed, "test_passed"))
+        .ToArray();
+
+static void AssertCanonicalGates(RecoveryReadinessDto recovery)
+{
+    Equal(RecoveryReadinessEvaluator.SchemaVersion, recovery.SchemaVersion);
+    Equal(
+        string.Join(",", RecoveryReadinessEvaluator.CanonicalGateNames),
+        string.Join(",", recovery.Gates.Select(gate => gate.Name)));
+}
+
 static void True(bool condition, string message)
 {
     if (!condition)
@@ -216,4 +260,26 @@ static void Equal<T>(T expected, T actual)
     {
         throw new InvalidOperationException($"Expected '{expected}' but got '{actual}'.");
     }
+}
+
+static void False(bool condition, string message)
+{
+    if (condition)
+    {
+        throw new InvalidOperationException(message);
+    }
+}
+
+internal sealed class StaticRecoveryReadinessProbe(IReadOnlyList<RecoveryGateProbeResult> gates) : IRecoveryReadinessProbe
+{
+    public Task<RecoveryReadinessProbeSnapshot> EvaluateAsync(CancellationToken cancellationToken) =>
+        Task.FromResult(new RecoveryReadinessProbeSnapshot(
+            new RecoveryOperationalSummaryDto(
+                MetadataAvailable: true,
+                TenantCount: 1,
+                RunningHeads: 1,
+                TotalHeads: 1,
+                RunningStorageNodes: 3,
+                TotalStorageNodes: 3),
+            gates));
 }

@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
   <ItemGroup>
     <ProjectReference Include="../Hedgehog.LocalRuntime/Hedgehog.LocalRuntime.csproj" />
+    <ProjectReference Include="../Hedgehog.Metadata.Core/Hedgehog.Metadata.Core.csproj" />
   </ItemGroup>
 </Project>

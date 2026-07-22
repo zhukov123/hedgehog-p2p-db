@@ -1,4 +1,5 @@
 using Hedgehog.Admin.Api;
+using Hedgehog.Metadata.Core;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -13,6 +14,9 @@ builder.Services.AddCors(options =>
     });
 });
 builder.Services.AddSingleton<AdminRepository>();
+builder.Services.AddSingleton<RecoveryReadinessOptions>();
+builder.Services.AddSingleton<IRecoveryReadinessProbe, AdminRecoveryReadinessProbe>();
+builder.Services.AddSingleton<RecoveryReadinessEvaluator>();
 
 var app = builder.Build();
 
@@ -180,10 +184,14 @@ adminCompat.MapGet("/audit", (
     AdminRepository repository) =>
     Results.Ok(repository.GetAuditEvents(actorId, action, targetType, result)));
 
-admin.MapGet("/recovery/gates", (AdminRepository repository) =>
-    Results.Ok(repository.GetRecoveryGates()));
-adminCompat.MapGet("/recovery/gates", (AdminRepository repository) =>
-    Results.Ok(repository.GetRecoveryGates()));
+admin.MapGet("/recovery/gates", async (
+    RecoveryReadinessEvaluator recoveryReadiness,
+    CancellationToken cancellationToken) =>
+    Results.Ok(await recoveryReadiness.EvaluateAsync(cancellationToken)));
+adminCompat.MapGet("/recovery/gates", async (
+    RecoveryReadinessEvaluator recoveryReadiness,
+    CancellationToken cancellationToken) =>
+    Results.Ok(await recoveryReadiness.EvaluateAsync(cancellationToken)));
 
 admin.MapPost("/recovery/gates/{gateId}/actions/{action}", (
     string gateId,
