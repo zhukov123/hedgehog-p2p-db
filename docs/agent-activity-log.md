@@ -14,7 +14,7 @@
   - `dotnet format Hedgehog.sln --verify-no-changes`
 - Container coverage: blocked because Docker Desktop's Linux engine was not running (`docker version` could not connect to `npipe:////./pipe/dockerDesktopLinuxEngine`). The local runtime test suite exercised the in-process multi-head, three-storage-node harness, stress scenario, restore drill, and API endpoints instead.
 - Severus: direct `sessions_send agentId: severus` failed with `agent not found`; shared Discord handoff sent in `#agentchat` as message/thread `1529354905964249128`. No actionable post-handoff reply was available when checked.
-- PR: pending
+- PR: https://github.com/zhukov123/hedgehog-p2p-db/pull/34
 - Next candidate task: resolve issue #29 by wiring admin recovery gates to the canonical readiness evaluator, after choosing the active recovery-gate PR to avoid duplicate work.
 
 ## 2026-07-13 - claim outbox workflow
