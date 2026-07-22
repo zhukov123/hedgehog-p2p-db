@@ -54,6 +54,19 @@ public static class LocalRuntimeBackup
         var storageRoot = Path.Combine(runtimeRoot, "storage");
         if (Directory.Exists(storageRoot))
         {
+            foreach (var file in Directory.EnumerateFiles(storageRoot, "agent-manifest.json", SearchOption.AllDirectories)
+                         .Order(StringComparer.Ordinal))
+            {
+                var relativePath = Path.GetRelativePath(runtimeRoot, file);
+                await CopyFileWithManifestAsync(
+                    runtimeRoot,
+                    backupRoot,
+                    relativePath,
+                    "storage_manifest",
+                    entries,
+                    cancellationToken).ConfigureAwait(false);
+            }
+
             foreach (var file in Directory.EnumerateFiles(storageRoot, "*.bin", SearchOption.AllDirectories)
                          .Order(StringComparer.Ordinal))
             {
@@ -145,6 +158,44 @@ public static class LocalRuntimeBackup
             {
                 throw new InvalidOperationException($"Backup file hash mismatch: {entry.RelativePath}");
             }
+        }
+
+        return manifest;
+    }
+
+    public static async Task<LocalRuntimeBackupManifest> RestoreAsync(
+        string backupRoot,
+        string restoreRuntimeRoot,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(restoreRuntimeRoot))
+        {
+            throw new ArgumentException("Restore runtime root is required.", nameof(restoreRuntimeRoot));
+        }
+
+        if (Directory.Exists(restoreRuntimeRoot))
+        {
+            throw new InvalidOperationException($"Restore runtime root already exists: {restoreRuntimeRoot}");
+        }
+
+        var manifest = await ValidateAsync(backupRoot, cancellationToken).ConfigureAwait(false);
+        Directory.CreateDirectory(restoreRuntimeRoot);
+
+        try
+        {
+            foreach (var entry in manifest.Entries)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var source = Path.Combine(backupRoot, entry.RelativePath);
+                var destination = Path.Combine(restoreRuntimeRoot, entry.RelativePath);
+                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                File.Copy(source, destination);
+            }
+        }
+        catch
+        {
+            Directory.Delete(restoreRuntimeRoot, recursive: true);
+            throw;
         }
 
         return manifest;

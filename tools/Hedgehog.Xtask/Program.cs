@@ -125,6 +125,9 @@ if (parsedCommand.Command == "run-local-restore-drill")
     {
         Console.WriteLine("local restore drill passed");
         Console.WriteLine($"runtime_root={result.RuntimeRoot}");
+        Console.WriteLine($"backup_root={result.BackupRoot}");
+        Console.WriteLine($"restored_runtime_root={result.RestoredRuntimeRoot}");
+        Console.WriteLine($"source_runtime_root_removed={result.SourceRuntimeRootRemoved}");
         Console.WriteLine($"heads_after_restore={result.HeadCountAfterRestore}");
         Console.WriteLine($"storage_nodes_after_restore={result.StorageNodeCountAfterRestore}");
         Console.WriteLine($"objects_recovered={result.ObjectsRecovered}");

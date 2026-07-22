@@ -93,9 +93,9 @@ delete_marker_rows=9
 
 ## Local Restore Drill
 
-The clean-shutdown restore drill writes encrypted objects, creates pending outbox and repair metadata, shuts the cluster down, checkpoints SQLite, writes a backup copy with a SHA-256 manifest, rejects missing and corrupted replica blobs in copied backups, restarts against the same runtime root and keys, then verifies a live read, a recovered delete marker, every healthy replica listed in metadata against restarted storage manifests, committed reservations, pending outbox work, pending repair work, and audit rows.
+The clean-shutdown restore drill writes encrypted objects, creates pending outbox and repair metadata, shuts the cluster down, checkpoints SQLite, writes a backup copy with a SHA-256 manifest, rejects missing and corrupted replica blobs in copied backups, removes the source runtime root, restores into a fresh runtime root with the same cluster keys, then verifies a live read, a recovered delete marker, every healthy replica listed in metadata against restored storage manifests, committed reservations, pending outbox work, pending repair work, and audit rows.
 
-This is still a local runtime restart smoke, not yet a complete production backup/restore service. The backup artifact now covers the SQLite database and live replica blobs so future restore work has a deterministic integrity gate to build on.
+This is still a local runtime drill, not yet a complete production backup/restore service. The backup artifact now covers the SQLite database, storage-agent manifests, and live replica blobs so future restore work has a deterministic integrity gate to build on.
 
 ```text
 dotnet run --project tools/Hedgehog.Xtask -- run-local-restore-drill
@@ -105,6 +105,7 @@ Expected shape:
 
 ```text
 local restore drill passed
+source_runtime_root_removed=True
 heads_after_restore=2
 storage_nodes_after_restore=3
 objects_recovered=2
@@ -114,7 +115,7 @@ healthy_replicas_verified=6
 committed_reservation_rows=6
 pending_outbox_rows=1
 pending_repair_job_rows=1
-backup_manifest_entries=7
+backup_manifest_entries=10
 missing_replica_blob_rejected=True
 corrupt_replica_blob_rejected=True
 ```
