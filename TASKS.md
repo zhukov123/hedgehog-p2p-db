@@ -153,7 +153,7 @@ Admin is not a later dashboard. For v1, admin status, repair visibility, audit r
 - [x] A user can store, fetch, and delete encrypted whole objects in the local runtime smoke.
 - [ ] The metadata store never exposes plaintext object contents or required plaintext names.
 - [x] At least three local storage agents can hold replicas in the local runtime smoke.
-- [ ] Failed or missing replicas produce repair jobs.
+- [x] Failed or missing replicas produce repair jobs.
 - [ ] Repair can restore minimum replica count.
 - [ ] Admin can see cluster health, nodes, capacity, objects, replicas, repair, audit, and recovery gates.
 - [ ] Dangerous admin actions are signed, audited, and visible.

@@ -60,6 +60,11 @@ public sealed record HeadNodeSnapshot(
     int StorageNodeCount,
     long PublishedObjectCount);
 
+public sealed record ReplicaRepairReconciliationResult(
+    int ReplicasChecked,
+    int ReplicaFailuresDetected,
+    int RepairJobsEnqueued);
+
 public interface IHeadNode
 {
     string HeadId { get; }

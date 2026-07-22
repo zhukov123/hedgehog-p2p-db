@@ -8,9 +8,9 @@ await connection.OpenAsync();
 var runner = SqliteMetadataAuthority.CreateMigrationRunner();
 await runner.ApplyMigrationsAsync(connection);
 
-Equal(6, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM __hedgehog_schema_migrations;"));
+Equal(7, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM __hedgehog_schema_migrations;"));
 Equal(Labels.AllGroups.SelectMany(group => group).Count(), await ScalarIntAsync(connection, "SELECT COUNT(*) FROM labels;"));
-Equal(13, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM workflow_definitions;"));
+Equal(14, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM workflow_definitions;"));
 Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM metadata_store WHERE store_id = 'default';"));
 
 await AssertTableHasColumnsAsync(connection, "objects", "tenant_id", "dataset_id", "object_lookup_hash", "lookup_key_id");
@@ -20,10 +20,11 @@ await AssertTableHasColumnsAsync(connection, "capacity_reservations", "reservati
 await AssertForeignKeyCheckCleanAsync(connection);
 
 await runner.ApplyMigrationsAsync(connection);
-Equal(6, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM __hedgehog_schema_migrations;"));
+Equal(7, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM __hedgehog_schema_migrations;"));
 
 await SeedAuthorityAsync(connection);
 await WriteLifecyclePersistsCoherentMetadataAsync(connection);
+await ReconcileReplicaFailureEnqueuesRepairAsync(connection);
 await DeleteMarkerPersistsTombstoneAsync(connection);
 await RemainingWorkflowSetPersistsCoherentMetadataAsync(connection);
 await ClaimOutboxClaimsEligibleEventsAsync(connection);
@@ -203,6 +204,52 @@ static async Task WriteLifecyclePersistsCoherentMetadataAsync(SqliteConnection c
     Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM objects WHERE object_id = 'object-a' AND current_version_id = 'version-a' AND state = 'active';"));
     Equal(2, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM capacity_reservations WHERE version_id = 'version-a' AND state = 'committed';"));
     Equal(4, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM audit_events WHERE object_id = 'object-a';"));
+}
+
+static async Task ReconcileReplicaFailureEnqueuesRepairAsync(SqliteConnection connection)
+{
+    var workflowStore = SqliteMetadataAuthority.CreateWorkflowStore();
+    var now = new DateTimeOffset(2026, 1, 2, 3, 5, 6, TimeSpan.Zero);
+
+    var result = await workflowStore.ReconcileReplicaFailureAsync(
+        connection,
+        new SqliteReconcileReplicaFailureRequest(
+            "tenant-a",
+            "dataset-a",
+            "object-a",
+            "version-a",
+            "replica-a",
+            "node-a",
+            "missing",
+            "replica_blob_missing",
+            now,
+            "idem-reconcile-replica-a"));
+
+    Equal("under_replicated", result.State);
+    Equal(false, result.Replayed);
+    Equal(1, result.OutboxTopics.Count);
+    Equal("repair.needed", result.OutboxTopics[0]);
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM replicas WHERE replica_id = 'replica-a' AND state = 'suspect';"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM replicas WHERE replica_id = 'replica-b' AND state = 'healthy';"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM object_versions WHERE version_id = 'version-a' AND state = 'under_replicated';"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM repair_jobs WHERE version_id = 'version-a' AND replica_id = 'replica-a' AND kind = 'missing_replace' AND state = 'pending';"));
+
+    var replay = await workflowStore.ReconcileReplicaFailureAsync(
+        connection,
+        new SqliteReconcileReplicaFailureRequest(
+            "tenant-a",
+            "dataset-a",
+            "object-a",
+            "version-a",
+            "replica-a",
+            "node-a",
+            "missing",
+            "replica_blob_missing",
+            now,
+            "idem-reconcile-replica-a"));
+
+    Equal(true, replay.Replayed);
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM repair_jobs WHERE version_id = 'version-a' AND kind = 'missing_replace';"));
 }
 
 static async Task DeleteMarkerPersistsTombstoneAsync(SqliteConnection connection)

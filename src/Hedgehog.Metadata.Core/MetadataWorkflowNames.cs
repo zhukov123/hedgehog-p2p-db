@@ -7,6 +7,7 @@ public static class MetadataWorkflowNames
     public const string CommitVersion = "commit_version";
     public const string DeleteMarker = "delete_marker";
     public const string LeaseRepair = "lease_repair";
+    public const string ReconcileReplicaFailure = "reconcile_replica_failure";
     public const string ExpireReservation = "expire_reservation";
     public const string CleanupConversion = "cleanup_conversion";
     public const string CapacityReport = "capacity_report";

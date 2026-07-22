@@ -119,6 +119,12 @@ missing_replica_blob_rejected=True
 corrupt_replica_blob_rejected=True
 ```
 
+## Local Repair Reconciliation
+
+The local runtime can now scan metadata-healthy replicas against file-backed storage agents. When a healthy replica is missing, corrupt, or unreadable, the head records an authority workflow decision, marks the replica suspect or corrupt, moves the version to `under_replicated` when it falls below policy, and creates one pending repair job for the version. Under-replicated objects remain readable from surviving healthy replicas.
+
+This is the first repair detection slice. It creates repair work; the worker that copies data back to a new healthy replica is still pending.
+
 ## Curlable Local Runtime API
 
 Start a fresh local runtime API:

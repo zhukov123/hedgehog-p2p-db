@@ -84,6 +84,18 @@ public sealed record SqliteLeaseRepairRequest(
     TimeSpan LeaseDuration,
     string IdempotencyKey);
 
+public sealed record SqliteReconcileReplicaFailureRequest(
+    string TenantId,
+    string DatasetId,
+    string ObjectId,
+    string VersionId,
+    string ReplicaId,
+    string NodeId,
+    string FailureKind,
+    string Reason,
+    DateTimeOffset DetectedAt,
+    string IdempotencyKey);
+
 public sealed record SqliteExpireReservationRequest(
     string TenantId,
     string DatasetId,
@@ -170,6 +182,11 @@ public interface ISqliteMetadataWorkflowStore
     Task<SqliteWorkflowResult> LeaseRepairAsync(
         IDbConnection connection,
         SqliteLeaseRepairRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<SqliteWorkflowResult> ReconcileReplicaFailureAsync(
+        IDbConnection connection,
+        SqliteReconcileReplicaFailureRequest request,
         CancellationToken cancellationToken = default);
 
     Task<SqliteWorkflowResult> ExpireReservationAsync(

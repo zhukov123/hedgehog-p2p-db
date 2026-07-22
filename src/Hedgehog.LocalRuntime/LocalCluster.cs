@@ -52,6 +52,11 @@ public sealed record LocalTenantRegistration(
     byte[] DatasetDataKey,
     int RequiredReplicaCount);
 
+public sealed record LocalRepairReconciliationResult(
+    int ReplicasChecked,
+    int ReplicaFailuresDetected,
+    int RepairJobsEnqueued);
+
 internal sealed record LocalTenantRuntime(
     LocalTenantRegistration Registration,
     IReadOnlyList<LocalHeadNode> Heads);
@@ -269,6 +274,24 @@ public sealed class LocalCluster : IAsyncDisposable
             .ToArray();
 
         return new LocalClusterSnapshot(RuntimeRoot, MetadataPath, tenantSnapshots, headSnapshots, storageSnapshots);
+    }
+
+    public async Task<LocalRepairReconciliationResult> ReconcileReplicaHealthAsync(
+        CancellationToken cancellationToken = default)
+    {
+        RequireStarted();
+        var checkedCount = 0;
+        var failureCount = 0;
+        var repairCount = 0;
+        foreach (var tenant in tenants.Values)
+        {
+            var result = await tenant.Heads[0].ReconcileReplicaHealthAsync(cancellationToken).ConfigureAwait(false);
+            checkedCount += result.ReplicasChecked;
+            failureCount += result.ReplicaFailuresDetected;
+            repairCount += result.RepairJobsEnqueued;
+        }
+
+        return new LocalRepairReconciliationResult(checkedCount, failureCount, repairCount);
     }
 
     public async Task<long> ScalarLongAsync(
