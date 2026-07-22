@@ -16,7 +16,7 @@
   - `docker compose -f observability/docker-compose.yml config`
 - Container/multi-node coverage: local two-head/three-storage-node smoke passed; Docker Compose observability config rendered successfully. Full compose stack was not started because this task changed only SQLite metadata workflow behavior.
 - Severus: direct configured-agent routing failed with `agent not found: severus`; fallback handoff sent in Discord `#agentchat` message `1529294954302804049`; auto-thread id `1529294954302804049` existed but the current thread reply body was not retrievable through the message tool during this run. Earlier Severus review had flagged immutable replay and duplicate gate-output risks; this branch covers both with tests.
-- PR: pending.
+- PR: https://github.com/zhukov123/hedgehog-p2p-db/pull/33
 - Next candidate task: implement the SQLite `revoke_actor_or_node` workflow, or connect the recovery snapshot to the admin read model.
 
 ## 2026-07-13 - claim outbox workflow
