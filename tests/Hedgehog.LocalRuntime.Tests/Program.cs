@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using System.Net.Http.Json;
+using System.Text.Json;
 
 var runtimeRoot = Path.Combine(Path.GetTempPath(), $"hedgehog-local-runtime-test-{Guid.NewGuid():N}");
 try
@@ -23,6 +24,7 @@ try
     await StressScenarioAsync(Path.Combine(runtimeRoot, "stress"));
     await RestoreDrillAsync(Path.Combine(runtimeRoot, "restore"));
     await RuntimeApiHealthEndpointsAsync(Path.Combine(runtimeRoot, "api-health"));
+    await RuntimeApiStatusDoesNotExposeRuntimePathsAsync(Path.Combine(runtimeRoot, "api-status"));
     await RuntimeApiHealthFailsClosedForUnknownGatesAsync(Path.Combine(runtimeRoot, "api-unknown"));
     await RuntimeApiHealthFailsClosedForFailedGateAsync(Path.Combine(runtimeRoot, "api-failed"));
     await RuntimeApiHealthFailsClosedForProbeExceptionAsync(Path.Combine(runtimeRoot, "api-exception"));
@@ -145,6 +147,25 @@ static async Task RuntimeApiHealthEndpointsAsync(string runtimeRoot)
 
     var metrics = await client.GetStringAsync("/metrics");
     True(metrics.Contains("hedgehog_runtime_recovery_ready 1", StringComparison.Ordinal), "metrics should render the same ready decision");
+}
+
+static async Task RuntimeApiStatusDoesNotExposeRuntimePathsAsync(string runtimeRoot)
+{
+    await using var app = CreateApi(runtimeRoot, new StaticRecoveryReadinessProbe(AllPassedGates()));
+    using var client = app.CreateClient();
+
+    var payload = await client.GetStringAsync("/runtime/status");
+    False(payload.Contains(runtimeRoot, StringComparison.Ordinal), "runtime status should not expose runtime root");
+    False(payload.Contains("metadata", StringComparison.OrdinalIgnoreCase) && payload.Contains(".sqlite", StringComparison.OrdinalIgnoreCase), "runtime status should not expose metadata path");
+
+    using var document = JsonDocument.Parse(payload);
+    var root = document.RootElement;
+    Equal(RuntimeStatusDto.CurrentSchemaVersion, root.GetProperty("schemaVersion").GetString());
+    Equal("running", root.GetProperty("status").GetString());
+    Equal(false, root.TryGetProperty("runtimeRoot", out _));
+    Equal(false, root.TryGetProperty("metadataPath", out _));
+    Equal(2, root.GetProperty("heads").GetArrayLength());
+    Equal(3, root.GetProperty("storageNodes").GetArrayLength());
 }
 
 static async Task RuntimeApiHealthFailsClosedForUnknownGatesAsync(string runtimeRoot)

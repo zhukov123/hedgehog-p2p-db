@@ -67,8 +67,9 @@ app.MapGet("/runtime/status", async (LocalCluster runtime, CancellationToken can
 {
     var snapshot = await runtime.SnapshotAsync(cancellationToken);
     return Results.Ok(new RuntimeStatusDto(
-        snapshot.RuntimeRoot,
-        snapshot.MetadataPath,
+        RuntimeStatusDto.CurrentSchemaVersion,
+        "running",
+        DateTimeOffset.UtcNow,
         snapshot.Tenants,
         snapshot.Heads,
         snapshot.StorageNodes.Select(node => new StorageNodeStatusDto(
@@ -287,11 +288,15 @@ public sealed record HealthClusterDto(
 public sealed record TenantCreatedDto(string TenantId, string DatasetId, int RequiredReplicaCount);
 
 public sealed record RuntimeStatusDto(
-    string RuntimeRoot,
-    string MetadataPath,
+    string SchemaVersion,
+    string Status,
+    DateTimeOffset CheckedAt,
     IReadOnlyList<LocalTenantSnapshot> Tenants,
     IReadOnlyList<HeadNodeSnapshot> Heads,
-    IReadOnlyList<StorageNodeStatusDto> StorageNodes);
+    IReadOnlyList<StorageNodeStatusDto> StorageNodes)
+{
+    public const string CurrentSchemaVersion = "runtime-status.v1";
+}
 
 public sealed record StorageNodeStatusDto(
     string NodeId,
