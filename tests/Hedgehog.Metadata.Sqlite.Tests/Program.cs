@@ -25,6 +25,7 @@ Equal(6, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM __hedgehog_schem
 await SeedAuthorityAsync(connection);
 await WriteLifecyclePersistsCoherentMetadataAsync(connection);
 await DeleteMarkerPersistsTombstoneAsync(connection);
+await AcceptInvitePersistsActorAndNodeMetadataAsync(connection);
 await RemainingWorkflowSetPersistsCoherentMetadataAsync(connection);
 await ClaimOutboxClaimsEligibleEventsAsync(connection);
 await CapacityReportRejectsInvalidAccountingAsync(connection);
@@ -230,6 +231,154 @@ static async Task DeleteMarkerPersistsTombstoneAsync(SqliteConnection connection
     Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM object_versions WHERE version_id = 'delete-version-a' AND state = 'delete_marker';"));
     Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM objects WHERE object_id = 'object-a' AND current_version_id = 'delete-version-a' AND state = 'delete_marker';"));
     Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM tombstones WHERE object_id = 'object-a' AND version_id = 'delete-version-a' AND delete_epoch = 1;"));
+}
+
+static async Task AcceptInvitePersistsActorAndNodeMetadataAsync(SqliteConnection connection)
+{
+    var workflowStore = SqliteMetadataAuthority.CreateWorkflowStore();
+    var now = new DateTimeOffset(2026, 1, 2, 4, 30, 0, TimeSpan.Zero);
+    var nowMs = now.ToUnixTimeMilliseconds();
+
+    await ExecuteAsync(
+        connection,
+        """
+        INSERT INTO invitations (
+            invitation_id,
+            tenant_id,
+            created_by_actor_id,
+            state,
+            invitee_hint,
+            token_hash,
+            encrypted_payload,
+            max_uses,
+            use_count,
+            created_at_ms,
+            expires_at_ms
+        )
+        VALUES
+            ('invite-actor-a', 'tenant-a', 'actor-a', 'active', 'new user', @actor_token, X'010203', 1, 0, @now_ms, @expires_ms),
+            ('invite-node-c', 'tenant-a', 'actor-a', 'active', 'node c', @node_token, X'040506', 1, 0, @now_ms, @expires_ms),
+            ('invite-wrong-token-a', 'tenant-a', 'actor-a', 'active', 'wrong token user', @wrong_token, X'101112', 1, 0, @now_ms, @expires_ms),
+            ('invite-expired-a', 'tenant-a', 'actor-a', 'active', 'expired user', @expired_token, X'070809', 1, 0, @now_ms, @expired_ms);
+        """,
+        ("@actor_token", new byte[] { 10, 11, 12 }),
+        ("@node_token", new byte[] { 20, 21, 22 }),
+        ("@wrong_token", new byte[] { 40, 41, 42 }),
+        ("@expired_token", new byte[] { 30, 31, 32 }),
+        ("@now_ms", nowMs),
+        ("@expires_ms", now.AddMinutes(5).ToUnixTimeMilliseconds()),
+        ("@expired_ms", now.AddMinutes(-1).ToUnixTimeMilliseconds()));
+
+    var actor = await workflowStore.AcceptInviteAsync(
+        connection,
+        new SqliteAcceptInviteRequest(
+            "tenant-a",
+            "invite-actor-a",
+            [10, 11, 12],
+            "actor",
+            "actor-invited-a",
+            "Invited Actor A",
+            "user",
+            "fingerprint-invited-a",
+            AcceptedNodeId: null,
+            NodeDisplayName: null,
+            NodePublicKeyFingerprint: null,
+            NodeAdvertiseEndpoint: null,
+            TrustDomain: null,
+            now.AddSeconds(1),
+            "idem-accept-invite-actor-a"));
+
+    Equal("accepted", actor.State);
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM actors WHERE actor_id = 'actor-invited-a' AND state = 'active' AND actor_kind = 'user';"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM invitations WHERE invitation_id = 'invite-actor-a' AND state = 'accepted' AND use_count = 1 AND accepted_by_actor_id = 'actor-invited-a';"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM audit_events WHERE workflow = 'accept_invite' AND actor_id = 'actor-invited-a' AND decision = 'allowed';"));
+
+    var actorReplay = await workflowStore.AcceptInviteAsync(
+        connection,
+        new SqliteAcceptInviteRequest(
+            "tenant-a",
+            "invite-actor-a",
+            [10, 11, 12],
+            "actor",
+            "actor-invited-a",
+            "Invited Actor A",
+            "user",
+            "fingerprint-invited-a",
+            AcceptedNodeId: null,
+            NodeDisplayName: null,
+            NodePublicKeyFingerprint: null,
+            NodeAdvertiseEndpoint: null,
+            TrustDomain: null,
+            now.AddSeconds(1),
+            "idem-accept-invite-actor-a"));
+
+    Equal(true, actorReplay.Replayed);
+
+    var node = await workflowStore.AcceptInviteAsync(
+        connection,
+        new SqliteAcceptInviteRequest(
+            "tenant-a",
+            "invite-node-c",
+            [20, 21, 22],
+            "node",
+            AcceptedActorId: null,
+            ActorDisplayName: null,
+            ActorKind: null,
+            ActorPublicKeyFingerprint: null,
+            AcceptedNodeId: "node-c",
+            NodeDisplayName: "Node C",
+            NodePublicKeyFingerprint: "fingerprint-node-c",
+            NodeAdvertiseEndpoint: "http://node-c.local",
+            TrustDomain: "home",
+            AcceptedAt: now.AddSeconds(2),
+            IdempotencyKey: "idem-accept-invite-node-c"));
+
+    Equal("accepted", node.State);
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM nodes WHERE node_id = 'node-c' AND state = 'active' AND tenant_id = 'tenant-a';"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM invitations WHERE invitation_id = 'invite-node-c' AND state = 'accepted' AND use_count = 1;"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM audit_events WHERE workflow = 'accept_invite' AND node_id = 'node-c' AND decision = 'allowed';"));
+
+    await ThrowsAsync<InvalidOperationException>(() => workflowStore.AcceptInviteAsync(
+        connection,
+        new SqliteAcceptInviteRequest(
+            "tenant-a",
+            "invite-wrong-token-a",
+            [99, 99, 99],
+            "node",
+            AcceptedActorId: null,
+            ActorDisplayName: null,
+            ActorKind: null,
+            ActorPublicKeyFingerprint: null,
+            AcceptedNodeId: "node-wrong-token",
+            NodeDisplayName: "Wrong Token Node",
+            NodePublicKeyFingerprint: "fingerprint-wrong-token",
+            NodeAdvertiseEndpoint: null,
+            TrustDomain: null,
+            AcceptedAt: now.AddSeconds(3),
+            IdempotencyKey: "idem-accept-invite-wrong-token")));
+
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM invitations WHERE invitation_id = 'invite-wrong-token-a' AND state = 'active' AND use_count = 0;"));
+
+    await ThrowsAsync<InvalidOperationException>(() => workflowStore.AcceptInviteAsync(
+        connection,
+        new SqliteAcceptInviteRequest(
+            "tenant-a",
+            "invite-expired-a",
+            [30, 31, 32],
+            "actor",
+            "actor-expired-a",
+            "Expired Actor A",
+            "user",
+            "fingerprint-expired-a",
+            AcceptedNodeId: null,
+            NodeDisplayName: null,
+            NodePublicKeyFingerprint: null,
+            NodeAdvertiseEndpoint: null,
+            TrustDomain: null,
+            now.AddSeconds(4),
+            "idem-accept-invite-expired-a")));
+
+    Equal(0, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM actors WHERE actor_id = 'actor-expired-a';"));
 }
 
 static async Task RemainingWorkflowSetPersistsCoherentMetadataAsync(SqliteConnection connection)
