@@ -13,6 +13,8 @@ CompleteReplicaRejectsHashMismatch(now);
 CommitRequiresReplicaQuorum(now);
 DeleteMarkerBecomesCurrentVersion(now);
 RepairLeaseFencesConcurrentLease(now);
+ExpireReservationRejectsEarlyExpiry(now);
+ExpiredReservationRejectsLateReplicaCompletion(now);
 
 Console.WriteLine("Hedgehog.Metadata.Core.Tests passed.");
 
@@ -227,6 +229,51 @@ static void RepairLeaseFencesConcurrentLease(DateTimeOffset now)
                 now.AddMinutes(2),
                 TimeSpan.FromMinutes(10),
                 new ReplicaId("r1"))),
+        "conflict");
+}
+
+static void ExpireReservationRejectsEarlyExpiry(DateTimeOffset now)
+{
+    var state = WithWriteIntent(now, requiredReplicas: 1);
+
+    MustFail(
+        MetadataDecider.ExpireReservation(
+            state,
+            new ExpireReservationCommand(
+                state.ObjectId,
+                new VersionId("v1"),
+                now.AddMinutes(14))),
+        "conflict");
+
+    Equal(ObjectVersionLifecycleState.Writing, state.Versions[0].State);
+    Equal(now.AddMinutes(15), state.Versions[0].WriteIntentExpiresAt);
+}
+
+static void ExpiredReservationRejectsLateReplicaCompletion(DateTimeOffset now)
+{
+    var state = WithWriteIntent(now, requiredReplicas: 1);
+    var expired = MustSucceed(MetadataDecider.ExpireReservation(
+        state,
+        new ExpireReservationCommand(
+            state.ObjectId,
+            new VersionId("v1"),
+            now.AddMinutes(15))));
+
+    Equal(ObjectVersionLifecycleState.GcEligible, expired.State.Versions[0].State);
+    Equal(null, expired.State.Versions[0].WriteIntentExpiresAt);
+    IsType<ReservationExpired>(expired.Events[0]);
+
+    MustFail(
+        MetadataDecider.CompleteReplica(
+            expired.State,
+            new CompleteReplicaCommand(
+                state.ObjectId,
+                new VersionId("v1"),
+                new ReplicaId("late-replica"),
+                new NodeId("node-late"),
+                now.AddMinutes(16),
+                12,
+                "sha256:abc")),
         "conflict");
 }
 

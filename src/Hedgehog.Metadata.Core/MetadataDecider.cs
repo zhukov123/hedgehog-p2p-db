@@ -328,6 +328,59 @@ public static class MetadataDecider
         return MetadataResult<MetadataDecision>.Ok(new MetadataDecision(next, [evt]));
     }
 
+    public static MetadataResult<MetadataDecision> ExpireReservation(
+        MetadataObjectState current,
+        ExpireReservationCommand command)
+    {
+        var validation = ValidateObjectCommand(current, command.ObjectId)
+            ?? RequireId(command.VersionId.Value, nameof(command.VersionId));
+
+        if (validation is not null)
+        {
+            return MetadataResult<MetadataDecision>.Fail(validation);
+        }
+
+        var version = FindVersion(current, command.VersionId);
+        if (version is null)
+        {
+            return MetadataResult<MetadataDecision>.Fail(
+                MetadataError.NotFound($"Version '{command.VersionId}' was not found."));
+        }
+
+        if (version.State != ObjectVersionLifecycleState.Writing)
+        {
+            return MetadataResult<MetadataDecision>.Fail(
+                MetadataError.Conflict($"Version '{command.VersionId}' cannot expire a reservation from state '{version.State}'."));
+        }
+
+        if (version.WriteIntentExpiresAt is not { } expiresAt)
+        {
+            return MetadataResult<MetadataDecision>.Fail(
+                MetadataError.Conflict($"Version '{command.VersionId}' has no write intent expiry."));
+        }
+
+        if (command.ExpiredAt < expiresAt)
+        {
+            return MetadataResult<MetadataDecision>.Fail(
+                MetadataError.Conflict($"Version '{command.VersionId}' cannot expire before '{expiresAt:O}'."));
+        }
+
+        var updatedVersion = version with
+        {
+            State = ObjectVersionLifecycleState.GcEligible,
+            WriteIntentExpiresAt = null,
+        };
+
+        var next = ReplaceVersion(current, updatedVersion);
+        var evt = new ReservationExpired(
+            command.ObjectId,
+            command.VersionId,
+            command.ExpiredAt,
+            expiresAt);
+
+        return MetadataResult<MetadataDecision>.Ok(new MetadataDecision(next, [evt]));
+    }
+
     private static MetadataError? ValidateObjectCommand(MetadataObjectState current, ObjectId objectId)
     {
         var validation = RequireId(objectId.Value, nameof(objectId));

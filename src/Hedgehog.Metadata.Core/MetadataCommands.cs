@@ -39,3 +39,8 @@ public sealed record AcquireRepairLeaseCommand(
     DateTimeOffset LeasedAt,
     TimeSpan LeaseDuration,
     ReplicaId? ReplicaId = null);
+
+public sealed record ExpireReservationCommand(
+    ObjectId ObjectId,
+    VersionId VersionId,
+    DateTimeOffset ExpiredAt);
