@@ -16,7 +16,7 @@
   - `dotnet run --project tools/Hedgehog.Xtask -- run-local-runtime-stress`
   - `dotnet run --project tools/Hedgehog.Xtask -- run-local-restore-drill`
 - Container coverage: `docker compose -f observability/docker-compose.yml config` passed. Starting the stack was blocked because the Docker Desktop Linux engine pipe was unavailable: `npipe:////./pipe/dockerDesktopLinuxEngine`.
-- PR: pending.
+- PR: https://github.com/zhukov123/hedgehog-p2p-db/pull/41
 - Next candidate task: issue #29, wire admin recovery gates to the canonical readiness evaluator.
 
 ## 2026-07-13 - claim outbox workflow
