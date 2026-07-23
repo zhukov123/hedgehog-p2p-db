@@ -53,7 +53,7 @@ Admin is not a later dashboard. For v1, admin status, repair visibility, audit r
   - [x] commit version
   - [x] delete marker
   - [x] lease repair
-  - [ ] expire reservation
+  - [x] expire reservation
   - [ ] cleanup conversion
   - [ ] capacity report
 - [ ] Implement transition tables for object, version, replica, reservation, lease, repair job, node, invitation, and audit decisions.

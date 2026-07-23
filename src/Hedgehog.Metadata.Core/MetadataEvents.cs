@@ -64,4 +64,13 @@ public sealed record RepairLeaseAcquired(
     public string WorkflowName => MetadataWorkflowNames.LeaseRepair;
 }
 
+public sealed record ReservationExpired(
+    ObjectId ObjectId,
+    VersionId VersionId,
+    DateTimeOffset OccurredAt,
+    DateTimeOffset WriteIntentExpiresAt) : IMetadataEvent
+{
+    public string WorkflowName => MetadataWorkflowNames.ExpireReservation;
+}
+
 public sealed record MetadataDecision(MetadataObjectState State, IReadOnlyList<IMetadataEvent> Events);
