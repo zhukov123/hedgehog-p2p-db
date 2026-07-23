@@ -14,7 +14,7 @@
   - `docker compose -f observability/docker-compose.yml config`
 - Container coverage: Docker is installed and the observability compose file validates; the stack was not started because this is a pure metadata-core transition slice with no container/runtime service behavior changed. Local multi-head/three-storage-node runtime tests passed.
 - Severus: direct `sessions_send` failed with `agent not found: severus`; no visible Severus sessions were listed. Discord handoff sent in `#agentchat`, message `1529717197604393050`; no reply was present when checked after the test run.
-- PR: pending.
+- PR: https://github.com/zhukov123/hedgehog-p2p-db/pull/40
 - Next candidate task: add the `cleanup_conversion` decision path to `Hedgehog.Metadata.Core`, then continue toward capacity report validation.
 
 ## 2026-07-13 - claim outbox workflow
