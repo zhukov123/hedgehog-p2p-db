@@ -67,8 +67,10 @@ app.MapGet("/runtime/status", async (LocalCluster runtime, CancellationToken can
 {
     var snapshot = await runtime.SnapshotAsync(cancellationToken);
     return Results.Ok(new RuntimeStatusDto(
-        snapshot.RuntimeRoot,
-        snapshot.MetadataPath,
+        new RuntimePersistenceStatusDto(
+            "sqlite",
+            MetadataAvailable: true,
+            snapshot.StorageNodes.Count),
         snapshot.Tenants,
         snapshot.Heads,
         snapshot.StorageNodes.Select(node => new StorageNodeStatusDto(
@@ -287,11 +289,15 @@ public sealed record HealthClusterDto(
 public sealed record TenantCreatedDto(string TenantId, string DatasetId, int RequiredReplicaCount);
 
 public sealed record RuntimeStatusDto(
-    string RuntimeRoot,
-    string MetadataPath,
+    RuntimePersistenceStatusDto Persistence,
     IReadOnlyList<LocalTenantSnapshot> Tenants,
     IReadOnlyList<HeadNodeSnapshot> Heads,
     IReadOnlyList<StorageNodeStatusDto> StorageNodes);
+
+public sealed record RuntimePersistenceStatusDto(
+    string MetadataBackend,
+    bool MetadataAvailable,
+    int StorageNodeCount);
 
 public sealed record StorageNodeStatusDto(
     string NodeId,
