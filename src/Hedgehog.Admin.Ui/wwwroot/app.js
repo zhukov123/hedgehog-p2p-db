@@ -188,11 +188,7 @@ async function loadGates() {
       <td>${gate.approvals}/${gate.requiredApprovals}</td>
       <td>${gate.blocks.map(escapeHtml).join("<br>")}</td>
       <td>${gate.allowedActions.map(escapeHtml).join("<br>")}</td>
-      <td>${actions([
-        ["Approve", `recovery-gate:approve:${gate.gateId}`],
-        ["Close", `recovery-gate:close:${gate.gateId}`],
-        ["Export", `recovery-gate:export-evidence:${gate.gateId}`]
-      ])}</td>
+      <td><span class="muted">projection only</span></td>
     </tr>`);
 }
 

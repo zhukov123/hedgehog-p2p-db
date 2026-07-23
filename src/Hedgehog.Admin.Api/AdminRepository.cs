@@ -1,14 +1,17 @@
+using Hedgehog.LocalRuntime.Api;
+
 namespace Hedgehog.Admin.Api;
 
 public sealed class AdminRepository
 {
+    public const string RecoveryGateActionRejectedReason = "recovery gates are projection-only; canonical evaluator only";
+
     private readonly Lock _gate = new();
     private readonly List<NodeDto> _nodes;
     private readonly List<CapacityScopeDto> _capacity;
     private readonly List<ObjectVersionDto> _objects;
     private readonly List<RepairJobDto> _repairJobs;
     private readonly List<AuditEventDto> _auditEvents;
-    private readonly List<RecoveryGateDto> _recoveryGates;
     private string _writeMode = "normal";
 
     public AdminRepository()
@@ -46,11 +49,6 @@ public sealed class AdminRepository
             Audit("system", "bootstrap", "cluster.status.sampled", "cluster", "cluster", "succeeded", "initial admin seed", now.AddMinutes(-20)),
             Audit("admin", "ops@example.invalid", "node.drain.started", "node", "node-b", "succeeded", "capacity pressure on node-b", now.AddMinutes(-12)),
             Audit("admin", "ops@example.invalid", "tenant.writes.frozen", "tenant", "tenant-beta", "succeeded", "effective free below reserve", now.AddMinutes(-8)),
-        ];
-        _recoveryGates =
-        [
-            new("gate-capacity-emergency", "Emergency capacity reserve", "open", "critical", "tenant-beta and node-b are below emergency reserve", now.AddMinutes(-9), 2, 1, ["ordinary writes", "low-priority repair"], ["delete", "gc", "critical repair", "audit export"]),
-            new("gate-node-quarantine", "Quarantined node evidence", "open", "warning", "node-d has stale heartbeat and suspect replicas", now.AddMinutes(-16), 1, 0, ["node reintegration"], ["force verify", "repair", "export evidence"]),
         ];
     }
 
@@ -170,7 +168,20 @@ public sealed class AdminRepository
     {
         lock (_gate)
         {
-            return _recoveryGates.ToArray();
+            var now = DateTimeOffset.UtcNow;
+            return RecoveryReadinessEvaluator.CanonicalGateNames
+                .Select(name => new RecoveryGateDto(
+                    name,
+                    name,
+                    RecoveryReadinessEvaluator.Unknown,
+                    "warning",
+                    "canonical evaluator projection pending",
+                    now,
+                    0,
+                    0,
+                    ["runtime admission"],
+                    ["projection-only"]))
+                .ToArray();
         }
     }
 
@@ -225,13 +236,10 @@ public sealed class AdminRepository
                     UpdateRepairJob(targetId, job => job with { State = "canceled_superseded", LastFailureReason = "operator cancelled safe duplicate" });
                     break;
                 case ("recovery-gate", "approve"):
-                    UpdateRecoveryGate(targetId, gate => gate with { Approvals = Math.Min(gate.RequiredApprovals, gate.Approvals + 1) });
-                    break;
                 case ("recovery-gate", "acknowledge"):
-                    UpdateRecoveryGate(targetId, gate => gate with { State = gate.Approvals >= gate.RequiredApprovals ? "closed" : "acknowledged" });
-                    break;
                 case ("recovery-gate", "close"):
-                    UpdateRecoveryGate(targetId, gate => gate with { State = "closed", Approvals = gate.RequiredApprovals });
+                    result = "rejected";
+                    reason = RecoveryGateActionRejectedReason;
                     break;
                 case ("capacity", "freeze-writes"):
                     UpdateCapacity(targetId, scope => scope with { WritesFrozen = true, UpdatedAt = now });
@@ -288,15 +296,6 @@ public sealed class AdminRepository
         if (index >= 0)
         {
             _repairJobs[index] = update(_repairJobs[index]);
-        }
-    }
-
-    private void UpdateRecoveryGate(string gateId, Func<RecoveryGateDto, RecoveryGateDto> update)
-    {
-        var index = _recoveryGates.FindIndex(gate => gate.GateId.Equals(gateId, StringComparison.OrdinalIgnoreCase));
-        if (index >= 0)
-        {
-            _recoveryGates[index] = update(_recoveryGates[index]);
         }
     }
 

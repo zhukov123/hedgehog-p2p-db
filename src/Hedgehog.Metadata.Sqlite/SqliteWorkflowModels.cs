@@ -115,6 +115,20 @@ public sealed record SqliteCapacityReportRequest(
     string IdempotencyKey,
     byte[]? RawReport = null);
 
+public sealed record SqliteAcceptInviteRequest(
+    string TenantId,
+    string InvitationId,
+    string AcceptedEntityKind,
+    string EntityId,
+    string DisplayName,
+    string PublicKeyFingerprint,
+    DateTimeOffset AcceptedAt,
+    string IdempotencyKey,
+    string? ActorKind = null,
+    string? NodeKeyId = null,
+    string? AdvertiseEndpoint = null,
+    string? TrustDomain = null);
+
 public sealed record SqliteClaimOutboxRequest(
     string ClaimedBy,
     DateTimeOffset ClaimedAt,
@@ -185,6 +199,11 @@ public interface ISqliteMetadataWorkflowStore
     Task<SqliteWorkflowResult> RecordCapacityReportAsync(
         IDbConnection connection,
         SqliteCapacityReportRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<SqliteWorkflowResult> AcceptInviteAsync(
+        IDbConnection connection,
+        SqliteAcceptInviteRequest request,
         CancellationToken cancellationToken = default);
 
     Task<SqliteClaimOutboxResult> ClaimOutboxAsync(
