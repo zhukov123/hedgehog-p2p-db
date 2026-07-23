@@ -158,7 +158,7 @@ curl -fsS http://localhost:5090/health/ready
 curl -fsS http://localhost:5090/health/cluster
 ```
 
-`/health/ready` returns HTTP 200 only when metadata is queryable and all in-process heads and storage nodes are running. `/health/cluster` returns the same readiness contract with counts for tenants, heads, storage nodes, metadata availability, and the runtime paths.
+`/health/ready` returns HTTP 200 only when metadata is queryable and all in-process heads and storage nodes are running. `/health/cluster` returns the same readiness contract with counts for tenants, heads, storage nodes, and metadata availability. `/runtime/status` exposes node, tenant, capacity, and replica counts plus a bounded opaque runtime ID; it does not return the runtime root or SQLite database path.
 
 ## Grafana Dashboard
 

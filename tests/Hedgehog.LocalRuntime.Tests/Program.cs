@@ -23,6 +23,7 @@ try
     await StressScenarioAsync(Path.Combine(runtimeRoot, "stress"));
     await RestoreDrillAsync(Path.Combine(runtimeRoot, "restore"));
     await RuntimeApiHealthEndpointsAsync(Path.Combine(runtimeRoot, "api-health"));
+    await RuntimeApiStatusDoesNotExposeFilesystemPathsAsync(Path.Combine(runtimeRoot, "api-status"));
     await RuntimeApiHealthFailsClosedForUnknownGatesAsync(Path.Combine(runtimeRoot, "api-unknown"));
     await RuntimeApiHealthFailsClosedForFailedGateAsync(Path.Combine(runtimeRoot, "api-failed"));
     await RuntimeApiHealthFailsClosedForProbeExceptionAsync(Path.Combine(runtimeRoot, "api-exception"));
@@ -145,6 +146,27 @@ static async Task RuntimeApiHealthEndpointsAsync(string runtimeRoot)
 
     var metrics = await client.GetStringAsync("/metrics");
     True(metrics.Contains("hedgehog_runtime_recovery_ready 1", StringComparison.Ordinal), "metrics should render the same ready decision");
+}
+
+static async Task RuntimeApiStatusDoesNotExposeFilesystemPathsAsync(string runtimeRoot)
+{
+    await using var app = CreateApi(runtimeRoot, new StaticRecoveryReadinessProbe(AllPassedGates()));
+    using var client = app.CreateClient();
+
+    var status = await client.GetFromJsonAsync<RuntimeStatusDto>("/runtime/status")
+        ?? throw new InvalidOperationException("runtime status endpoint returned no payload");
+    True(status.RuntimeId.StartsWith("runtime-", StringComparison.Ordinal), "runtime status should expose a bounded opaque runtime id");
+    Equal("sqlite", status.MetadataStore);
+    Equal(1, status.Tenants.Count);
+    Equal(2, status.Heads.Count);
+    Equal(3, status.StorageNodes.Count);
+
+    var payload = await client.GetStringAsync("/runtime/status");
+    False(payload.Contains(runtimeRoot, StringComparison.Ordinal), "runtime status should not expose runtime root");
+    False(payload.Contains(Path.Combine(runtimeRoot, "metadata", "hedgehog.sqlite"), StringComparison.Ordinal), "runtime status should not expose metadata path");
+    False(payload.Contains(".sqlite", StringComparison.OrdinalIgnoreCase), "runtime status should not expose sqlite filesystem path details");
+    False(payload.Contains("metadataPath", StringComparison.OrdinalIgnoreCase), "runtime status should not expose metadata path field");
+    False(payload.Contains("runtimeRoot", StringComparison.OrdinalIgnoreCase), "runtime status should not expose runtime root field");
 }
 
 static async Task RuntimeApiHealthFailsClosedForUnknownGatesAsync(string runtimeRoot)
