@@ -12,8 +12,8 @@
   - `dotnet run --project tools/Hedgehog.Xtask -- run-local-restore-drill`
   - `dotnet format Hedgehog.sln --verify-no-changes`
 - Container coverage: blocked because Docker Desktop's Linux engine is not running in the VM (`docker version` could not connect to `//./pipe/dockerDesktopLinuxEngine`). Local runtime tests and restore drill cover in-process multi-head and multi-storage-node behavior.
-- Severus: direct configured-agent session lookup failed (`agent not found: severus`; no visible Severus sessions). Fallback handoff sent in Discord `#agentchat`, guild `1449223265590710426`, channel `1473509684135596285`, message `1529838179090169949`.
-- PR: pending.
+- Severus: direct configured-agent session lookup failed (`agent not found: severus`; no visible Severus sessions). Fallback handoff sent in Discord `#agentchat`, guild `1449223265590710426`, channel `1473509684135596285`, message `1529838179090169949`. Severus later posted general PR-pile risk review messages in the same channel (`1529841627558838302`, `1529841628225732739`, `1529841628896821340`), recommending canonical branch selection for duplicate workflow areas and VM test evidence for recovery milestones. No code edits from Severus.
+- PR: https://github.com/zhukov123/hedgehog-p2p-db/pull/42
 - Next candidate task: implement another concrete recovery-readiness gate, likely `manifest_reconciliation` or `reservation_reconciliation`, so `/health/ready` can move closer to production readiness instead of unknown fail-closed gates.
 
 ## 2026-07-13 - claim outbox workflow
