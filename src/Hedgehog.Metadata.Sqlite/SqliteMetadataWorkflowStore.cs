@@ -1200,6 +1200,150 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
         }
     }
 
+    public async Task<SqliteWorkflowResult> EvaluateRecoveryGateAsync(
+        IDbConnection connection,
+        SqliteEvaluateRecoveryGateRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateEvaluateRecoveryGate(request);
+        var db = RequireDbConnection(connection);
+        await EnsureOpenAsync(db, cancellationToken).ConfigureAwait(false);
+        await using var transaction = await db.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            var replay = await TryBeginIdempotencyAsync(
+                db,
+                transaction,
+                request.IdempotencyKey,
+                tenantId: null,
+                datasetId: null,
+                MetadataWorkflowNames.EvaluateRecoveryGate,
+                actorId: null,
+                request,
+                request.EvaluatedAt,
+                cancellationToken).ConfigureAwait(false);
+
+            if (replay)
+            {
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                return new SqliteWorkflowResult(MetadataWorkflowNames.EvaluateRecoveryGate, "replayed", Replayed: true, []);
+            }
+
+            var previousMode = await ScalarStringAsync(
+                db,
+                transaction,
+                "SELECT degraded_mode FROM metadata_store WHERE store_id = @store_id;",
+                cancellationToken,
+                ("@store_id", request.StoreId)).ConfigureAwait(false);
+            if (previousMode is null)
+            {
+                throw new InvalidOperationException("Metadata store was not found.");
+            }
+
+            var evaluatedAtMs = ToUnixMs(request.EvaluatedAt);
+            var pendingOutboxEvents = await ScalarLongAsync(
+                db,
+                transaction,
+                "SELECT COUNT(*) FROM outbox_events WHERE delivered_at_ms IS NULL;",
+                cancellationToken).ConfigureAwait(false) ?? 0;
+            var oldestOutboxAvailableAtMs = await ScalarLongAsync(
+                db,
+                transaction,
+                "SELECT MIN(available_at_ms) FROM outbox_events WHERE delivered_at_ms IS NULL;",
+                cancellationToken).ConfigureAwait(false);
+            var outboxLagMs = oldestOutboxAvailableAtMs is null
+                ? 0
+                : Math.Max(0, evaluatedAtMs - oldestOutboxAvailableAtMs.Value);
+
+            var gatesPassed =
+                request.MigrationsCurrent
+                && request.InvariantChecksPassed
+                && request.AuthorityCachesRebuilt
+                && request.AuditAppendAvailable
+                && request.RepairBacklogSafe
+                && pendingOutboxEvents <= request.MaxPendingOutboxEvents
+                && outboxLagMs <= request.MaxOutboxLag.TotalMilliseconds;
+            var nextMode = gatesPassed ? "normal" : "recovering";
+
+            await ExecuteAsync(
+                db,
+                transaction,
+                """
+                UPDATE metadata_store
+                SET degraded_mode = @degraded_mode,
+                    updated_at_ms = @updated_at_ms,
+                    metadata = @metadata
+                WHERE store_id = @store_id;
+                """,
+                cancellationToken,
+                ("@degraded_mode", nextMode),
+                ("@updated_at_ms", evaluatedAtMs),
+                ("@metadata", BuildRecoveryGateMetadata(request, pendingOutboxEvents, outboxLagMs, previousMode, nextMode)),
+                ("@store_id", request.StoreId)).ConfigureAwait(false);
+
+            if (!string.Equals(previousMode, nextMode, StringComparison.Ordinal))
+            {
+                await ExecuteAsync(
+                    db,
+                    transaction,
+                    """
+                    INSERT INTO outbox_events (
+                        outbox_id,
+                        workflow,
+                        destination_node_id,
+                        topic,
+                        payload,
+                        idempotency_key,
+                        available_at_ms,
+                        created_at_ms
+                    )
+                    VALUES (
+                        @outbox_id,
+                        @workflow,
+                        NULL,
+                        @topic,
+                        @payload,
+                        @idempotency_key,
+                        @available_at_ms,
+                        @created_at_ms
+                    );
+                    """,
+                    cancellationToken,
+                    ("@outbox_id", $"recovery-gate-{request.StoreId}-{request.IdempotencyKey}"),
+                    ("@workflow", MetadataWorkflowNames.EvaluateRecoveryGate),
+                    ("@topic", "recovery.gate_evaluated"),
+                    ("@payload", Encoding.UTF8.GetBytes($"{previousMode}->{nextMode}")),
+                    ("@idempotency_key", $"outbox-{request.IdempotencyKey}"),
+                    ("@available_at_ms", evaluatedAtMs),
+                    ("@created_at_ms", evaluatedAtMs)).ConfigureAwait(false);
+            }
+
+            await AppendWorkflowAuditAsync(
+                db,
+                transaction,
+                MetadataWorkflowNames.EvaluateRecoveryGate,
+                "allowed",
+                request.IdempotencyKey,
+                request.EvaluatedAt,
+                cancellationToken).ConfigureAwait(false);
+
+            await CompleteIdempotencyAsync(db, transaction, request.IdempotencyKey, request.EvaluatedAt, cancellationToken)
+                .ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+
+            var topics = string.Equals(previousMode, nextMode, StringComparison.Ordinal)
+                ? Array.Empty<string>()
+                : ["recovery.gate_evaluated"];
+            return new SqliteWorkflowResult(MetadataWorkflowNames.EvaluateRecoveryGate, nextMode, Replayed: false, topics);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
+    }
+
     private static async Task<IReadOnlyList<SqliteClaimedOutboxEvent>> ClaimOutboxRowsAsync(
         DbConnection connection,
         DbTransaction transaction,
@@ -1429,6 +1573,57 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
             ("@idempotency_key", idempotencyKey),
             ("@occurred_at_ms", ToUnixMs(occurredAt)));
 
+    private static Task AppendWorkflowAuditAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        string workflow,
+        string decision,
+        string idempotencyKey,
+        DateTimeOffset occurredAt,
+        CancellationToken cancellationToken) =>
+        ExecuteAsync(
+            connection,
+            transaction,
+            """
+            INSERT INTO audit_events (
+                workflow,
+                decision,
+                idempotency_key,
+                occurred_at_ms
+            )
+            VALUES (
+                @workflow,
+                @decision,
+                @idempotency_key,
+                @occurred_at_ms
+            );
+            """,
+            cancellationToken,
+            ("@workflow", workflow),
+            ("@decision", decision),
+            ("@idempotency_key", idempotencyKey),
+            ("@occurred_at_ms", ToUnixMs(occurredAt)));
+
+    private static string BuildRecoveryGateMetadata(
+        SqliteEvaluateRecoveryGateRequest request,
+        long pendingOutboxEvents,
+        long outboxLagMs,
+        string previousMode,
+        string nextMode) =>
+        string.Join(
+            ';',
+            $"previous_mode={previousMode}",
+            $"next_mode={nextMode}",
+            $"migrations_current={request.MigrationsCurrent}",
+            $"invariant_checks_passed={request.InvariantChecksPassed}",
+            $"authority_caches_rebuilt={request.AuthorityCachesRebuilt}",
+            $"audit_append_available={request.AuditAppendAvailable}",
+            $"repair_backlog_safe={request.RepairBacklogSafe}",
+            $"pending_outbox_events={pendingOutboxEvents}",
+            $"max_pending_outbox_events={request.MaxPendingOutboxEvents}",
+            $"outbox_lag_ms={outboxLagMs}",
+            $"max_outbox_lag_ms={(long)request.MaxOutboxLag.TotalMilliseconds}");
+
     private static async Task<int> ExecuteAsync(
         DbConnection connection,
         DbTransaction transaction,
@@ -1636,6 +1831,14 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
         }
     }
 
+    private static void ValidateEvaluateRecoveryGate(SqliteEvaluateRecoveryGateRequest request)
+    {
+        RequireText(request.StoreId, nameof(request.StoreId));
+        RequireNonNegative(request.MaxPendingOutboxEvents, nameof(request.MaxPendingOutboxEvents));
+        RequireNonNegative(request.MaxOutboxLag, nameof(request.MaxOutboxLag));
+        RequireText(request.IdempotencyKey, nameof(request.IdempotencyKey));
+    }
+
     private static void RequireKnownLabel(IReadOnlyList<LabelSpec> labels, string value, string name)
     {
         if (!labels.Any(label => string.Equals(label.Wire, value, StringComparison.Ordinal)))
@@ -1699,6 +1902,14 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
     private static void RequireNonNegative(long value, string name)
     {
         if (value < 0)
+        {
+            throw new ArgumentOutOfRangeException(name, value, $"{name} must be non-negative.");
+        }
+    }
+
+    private static void RequireNonNegative(TimeSpan value, string name)
+    {
+        if (value < TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(name, value, $"{name} must be non-negative.");
         }
