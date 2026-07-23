@@ -123,6 +123,13 @@ public sealed record SqliteClaimOutboxRequest(
     string? DestinationNodeId = null,
     string? Topic = null);
 
+public sealed record SqliteEvaluateRecoveryGateRequest(
+    string ActorId,
+    DateTimeOffset EvaluatedAt,
+    TimeSpan MaxOutboxLag,
+    int ExpectedMigrationCount,
+    string IdempotencyKey);
+
 public sealed record SqliteClaimedOutboxEvent(
     string OutboxId,
     string Workflow,
@@ -144,6 +151,16 @@ public sealed record SqliteWorkflowResult(
 public sealed record SqliteClaimOutboxResult(
     SqliteWorkflowResult WorkflowResult,
     IReadOnlyList<SqliteClaimedOutboxEvent> Events);
+
+public sealed record SqliteRecoveryGateCheck(
+    string Name,
+    bool Passed,
+    long ObservedCount,
+    string Detail);
+
+public sealed record SqliteEvaluateRecoveryGateResult(
+    SqliteWorkflowResult WorkflowResult,
+    IReadOnlyList<SqliteRecoveryGateCheck> Checks);
 
 public interface ISqliteMetadataWorkflowStore
 {
@@ -190,5 +207,10 @@ public interface ISqliteMetadataWorkflowStore
     Task<SqliteClaimOutboxResult> ClaimOutboxAsync(
         IDbConnection connection,
         SqliteClaimOutboxRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<SqliteEvaluateRecoveryGateResult> EvaluateRecoveryGateAsync(
+        IDbConnection connection,
+        SqliteEvaluateRecoveryGateRequest request,
         CancellationToken cancellationToken = default);
 }
