@@ -3,6 +3,7 @@ using Hedgehog.LocalRuntime.Api;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using System.Net.Http.Json;
 
@@ -27,6 +28,13 @@ try
     await RuntimeApiHealthFailsClosedForFailedGateAsync(Path.Combine(runtimeRoot, "api-failed"));
     await RuntimeApiHealthFailsClosedForProbeExceptionAsync(Path.Combine(runtimeRoot, "api-exception"));
     await RuntimeApiHealthFailsClosedForProbeTimeoutAsync(Path.Combine(runtimeRoot, "api-timeout"));
+    await RuntimeApiOutboxActiveLeaseDoesNotFailAsync(Path.Combine(runtimeRoot, "api-outbox-active-lease"));
+    await RuntimeApiOutboxFutureUnclaimedRetryDoesNotFailAsync(Path.Combine(runtimeRoot, "api-outbox-future-retry"));
+    await RuntimeApiOutboxExpiredLeaseFailsAsync(Path.Combine(runtimeRoot, "api-outbox-expired-lease"));
+    await RuntimeApiOutboxReadyUnclaimedEventFailsAsync(Path.Combine(runtimeRoot, "api-outbox-ready-unclaimed"));
+    await RuntimeApiOutboxExactLeaseExpiryFailsAsync(Path.Combine(runtimeRoot, "api-outbox-expiry-boundary"));
+    await RuntimeApiOutboxDeliveredExpiredLeaseIsIgnoredAsync(Path.Combine(runtimeRoot, "api-outbox-delivered-expired"));
+    await RuntimeApiOutboxDelayedExpiredLeaseFailsAsync(Path.Combine(runtimeRoot, "api-outbox-delayed-expired"));
 
     Console.WriteLine("Hedgehog.LocalRuntime.Tests passed.");
 }
@@ -225,10 +233,145 @@ static async Task RuntimeApiHealthFailsClosedForProbeTimeoutAsync(string runtime
     True(ready.Recovery.Gates.All(gate => gate.Reason == "probe_timeout"), "probe timeouts should use a bounded reason");
 }
 
+static async Task RuntimeApiOutboxActiveLeaseDoesNotFailAsync(string runtimeRoot)
+{
+    var now = new DateTimeOffset(2026, 1, 2, 6, 30, 0, TimeSpan.Zero);
+    await using var app = CreateApi(runtimeRoot, timeProvider: new FixedTimeProvider(now));
+    using var client = app.CreateClient();
+    var runtime = app.Services.GetRequiredService<LocalCluster>();
+    var nowMs = now.ToUnixTimeMilliseconds();
+    await InsertOutboxEventAsync(
+        runtime.MetadataPath,
+        "leased-active",
+        availableAtMs: nowMs - 120_000,
+        claimedBy: "publisher-a",
+        claimedUntilMs: nowMs + 120_000);
+
+    var ready = await ReadReadyAsync(client);
+    AssertOutboxGate(ready, RecoveryReadinessEvaluator.Passed, "no_reclaimable_outbox");
+    await AssertMetricsReadyMatchesAsync(client, ready);
+}
+
+static async Task RuntimeApiOutboxFutureUnclaimedRetryDoesNotFailAsync(string runtimeRoot)
+{
+    var now = new DateTimeOffset(2026, 1, 2, 6, 30, 0, TimeSpan.Zero);
+    await using var app = CreateApi(runtimeRoot, timeProvider: new FixedTimeProvider(now));
+    using var client = app.CreateClient();
+    var runtime = app.Services.GetRequiredService<LocalCluster>();
+    var nowMs = now.ToUnixTimeMilliseconds();
+    await InsertOutboxEventAsync(
+        runtime.MetadataPath,
+        "retry-future",
+        availableAtMs: nowMs + 120_000,
+        claimedBy: null,
+        claimedUntilMs: null);
+
+    var ready = await ReadReadyAsync(client);
+    AssertOutboxGate(ready, RecoveryReadinessEvaluator.Passed, "no_reclaimable_outbox");
+    await AssertMetricsReadyMatchesAsync(client, ready);
+}
+
+static async Task RuntimeApiOutboxExpiredLeaseFailsAsync(string runtimeRoot)
+{
+    var now = new DateTimeOffset(2026, 1, 2, 6, 30, 0, TimeSpan.Zero);
+    await using var app = CreateApi(runtimeRoot, timeProvider: new FixedTimeProvider(now));
+    using var client = app.CreateClient();
+    var runtime = app.Services.GetRequiredService<LocalCluster>();
+    var nowMs = now.ToUnixTimeMilliseconds();
+    await InsertOutboxEventAsync(
+        runtime.MetadataPath,
+        "leased-expired",
+        availableAtMs: nowMs - 120_000,
+        claimedBy: "publisher-a",
+        claimedUntilMs: nowMs - 60_000);
+
+    var ready = await ReadReadyAsync(client);
+    AssertOutboxGate(ready, RecoveryReadinessEvaluator.Failed, "expired_outbox_claims=1");
+    await AssertMetricsReadyMatchesAsync(client, ready);
+}
+
+static async Task RuntimeApiOutboxReadyUnclaimedEventFailsAsync(string runtimeRoot)
+{
+    var now = new DateTimeOffset(2026, 1, 2, 6, 30, 0, TimeSpan.Zero);
+    await using var app = CreateApi(runtimeRoot, timeProvider: new FixedTimeProvider(now));
+    using var client = app.CreateClient();
+    var runtime = app.Services.GetRequiredService<LocalCluster>();
+    var nowMs = now.ToUnixTimeMilliseconds();
+    await InsertOutboxEventAsync(
+        runtime.MetadataPath,
+        "ready-unclaimed",
+        availableAtMs: nowMs - 120_000,
+        claimedBy: null,
+        claimedUntilMs: null);
+
+    var ready = await ReadReadyAsync(client);
+    AssertOutboxGate(ready, RecoveryReadinessEvaluator.Failed, "ready_unclaimed_outbox=1");
+    await AssertMetricsReadyMatchesAsync(client, ready);
+}
+
+static async Task RuntimeApiOutboxExactLeaseExpiryFailsAsync(string runtimeRoot)
+{
+    var now = new DateTimeOffset(2026, 1, 2, 6, 30, 0, TimeSpan.Zero);
+    await using var app = CreateApi(runtimeRoot, timeProvider: new FixedTimeProvider(now));
+    using var client = app.CreateClient();
+    var runtime = app.Services.GetRequiredService<LocalCluster>();
+    var nowMs = now.ToUnixTimeMilliseconds();
+    await InsertOutboxEventAsync(
+        runtime.MetadataPath,
+        "leased-expiry-boundary",
+        availableAtMs: nowMs - 120_000,
+        claimedBy: "publisher-a",
+        claimedUntilMs: nowMs);
+
+    var ready = await ReadReadyAsync(client);
+    AssertOutboxGate(ready, RecoveryReadinessEvaluator.Failed, "expired_outbox_claims=1");
+    await AssertMetricsReadyMatchesAsync(client, ready);
+}
+
+static async Task RuntimeApiOutboxDeliveredExpiredLeaseIsIgnoredAsync(string runtimeRoot)
+{
+    var now = new DateTimeOffset(2026, 1, 2, 6, 30, 0, TimeSpan.Zero);
+    await using var app = CreateApi(runtimeRoot, timeProvider: new FixedTimeProvider(now));
+    using var client = app.CreateClient();
+    var runtime = app.Services.GetRequiredService<LocalCluster>();
+    var nowMs = now.ToUnixTimeMilliseconds();
+    await InsertOutboxEventAsync(
+        runtime.MetadataPath,
+        "delivered-expired",
+        availableAtMs: nowMs - 120_000,
+        claimedBy: "publisher-a",
+        claimedUntilMs: nowMs - 60_000,
+        deliveredAtMs: nowMs - 30_000);
+
+    var ready = await ReadReadyAsync(client);
+    AssertOutboxGate(ready, RecoveryReadinessEvaluator.Passed, "no_reclaimable_outbox");
+    await AssertMetricsReadyMatchesAsync(client, ready);
+}
+
+static async Task RuntimeApiOutboxDelayedExpiredLeaseFailsAsync(string runtimeRoot)
+{
+    var now = new DateTimeOffset(2026, 1, 2, 6, 30, 0, TimeSpan.Zero);
+    await using var app = CreateApi(runtimeRoot, timeProvider: new FixedTimeProvider(now));
+    using var client = app.CreateClient();
+    var runtime = app.Services.GetRequiredService<LocalCluster>();
+    var nowMs = now.ToUnixTimeMilliseconds();
+    await InsertOutboxEventAsync(
+        runtime.MetadataPath,
+        "delayed-expired",
+        availableAtMs: nowMs + 120_000,
+        claimedBy: "publisher-a",
+        claimedUntilMs: nowMs - 60_000);
+
+    var ready = await ReadReadyAsync(client);
+    AssertOutboxGate(ready, RecoveryReadinessEvaluator.Failed, "expired_outbox_claims=1");
+    await AssertMetricsReadyMatchesAsync(client, ready);
+}
+
 static WebApplicationFactory<LocalRuntimeApiAssemblyMarker> CreateApi(
     string runtimeRoot,
     IRecoveryReadinessProbe? probe = null,
-    RecoveryReadinessOptions? options = null)
+    RecoveryReadinessOptions? options = null,
+    TimeProvider? timeProvider = null)
 {
     var contentRoot = Path.Combine(FindRepoRoot(), "src", "Hedgehog.LocalRuntime.Api");
     return new WebApplicationFactory<LocalRuntimeApiAssemblyMarker>()
@@ -248,8 +391,103 @@ static WebApplicationFactory<LocalRuntimeApiAssemblyMarker> CreateApi(
                 {
                     services.AddSingleton(options);
                 }
+
+                if (timeProvider is not null)
+                {
+                    services.AddSingleton(timeProvider);
+                }
             });
         });
+}
+
+static async Task<HealthClusterDto> ReadReadyAsync(HttpClient client)
+{
+    using var response = await client.GetAsync("/health/ready");
+    return await response.Content.ReadFromJsonAsync<HealthClusterDto>()
+        ?? throw new InvalidOperationException("ready health endpoint returned no payload");
+}
+
+static async Task AssertMetricsReadyMatchesAsync(HttpClient client, HealthClusterDto ready)
+{
+    var metrics = await client.GetStringAsync("/metrics");
+    var expected = $"hedgehog_runtime_recovery_ready {Convert.ToInt32(ready.Ready)}";
+    True(metrics.Contains(expected, StringComparison.Ordinal), "metrics should render the same evaluator decision");
+}
+
+static async Task InsertOutboxEventAsync(
+    string metadataPath,
+    string outboxId,
+    long availableAtMs,
+    string? claimedBy,
+    long? claimedUntilMs,
+    long? deliveredAtMs = null)
+{
+    await ExecuteSqlAsync(
+        metadataPath,
+        """
+        INSERT INTO outbox_events (
+            outbox_id,
+            workflow,
+            destination_node_id,
+            topic,
+            payload,
+            idempotency_key,
+            available_at_ms,
+            claimed_by,
+            claimed_until_ms,
+            delivered_at_ms,
+            created_at_ms
+        )
+        VALUES (
+            @outbox_id,
+            'claim_outbox',
+            'node-1',
+            'readiness.test',
+            @payload,
+            @outbox_id,
+            @available_at_ms,
+            @claimed_by,
+            @claimed_until_ms,
+            @delivered_at_ms,
+            @created_at_ms
+        );
+        """,
+        ("@outbox_id", outboxId),
+        ("@payload", new byte[] { 1, 2, 3, 4 }),
+        ("@available_at_ms", availableAtMs),
+        ("@claimed_by", claimedBy),
+        ("@claimed_until_ms", claimedUntilMs),
+        ("@delivered_at_ms", deliveredAtMs),
+        ("@created_at_ms", availableAtMs - 60_000));
+}
+
+static void AssertOutboxGate(HealthClusterDto ready, string status, string reason)
+{
+    var gate = ready.Recovery.Gates.Single(gate => gate.Name == "outbox_reconciliation");
+    Equal(status, gate.Status);
+    Equal(reason, gate.Reason);
+}
+
+static async Task ExecuteSqlAsync(
+    string metadataPath,
+    string sql,
+    params (string Name, object? Value)[] parameters)
+{
+    var connectionString = new SqliteConnectionStringBuilder
+    {
+        DataSource = metadataPath,
+        Cache = SqliteCacheMode.Shared,
+    }.ToString();
+    await using var connection = new SqliteConnection(connectionString);
+    await connection.OpenAsync();
+    await using var command = connection.CreateCommand();
+    command.CommandText = sql;
+    foreach (var (name, value) in parameters)
+    {
+        command.Parameters.AddWithValue(name, value ?? DBNull.Value);
+    }
+
+    await command.ExecuteNonQueryAsync();
 }
 
 static IReadOnlyList<RecoveryGateProbeResult> AllPassedGates() =>
@@ -345,4 +583,9 @@ internal sealed class SlowRecoveryReadinessProbe : IRecoveryReadinessProbe
         await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
         throw new InvalidOperationException("unreachable");
     }
+}
+
+internal sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
+{
+    public override DateTimeOffset GetUtcNow() => utcNow;
 }

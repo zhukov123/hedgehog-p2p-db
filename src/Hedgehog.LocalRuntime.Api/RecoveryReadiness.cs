@@ -143,7 +143,9 @@ public sealed class RecoveryReadinessEvaluator(
     }
 }
 
-internal sealed class LocalRuntimeRecoveryReadinessProbe(LocalCluster runtime) : IRecoveryReadinessProbe
+internal sealed class LocalRuntimeRecoveryReadinessProbe(
+    LocalCluster runtime,
+    TimeProvider timeProvider) : IRecoveryReadinessProbe
 {
     public async Task<RecoveryReadinessProbeSnapshot> EvaluateAsync(CancellationToken cancellationToken)
     {
@@ -154,9 +156,27 @@ internal sealed class LocalRuntimeRecoveryReadinessProbe(LocalCluster runtime) :
         var auditEvents = await runtime.ScalarLongAsync(
             "SELECT COUNT(*) FROM audit_events;",
             cancellationToken).ConfigureAwait(false);
-        var pendingOutbox = await runtime.ScalarLongAsync(
-            "SELECT COUNT(*) FROM outbox_events WHERE delivered_at_ms IS NULL;",
-            cancellationToken).ConfigureAwait(false);
+        var nowMs = timeProvider.GetUtcNow().ToUnixTimeMilliseconds();
+        var expiredClaims = await runtime.ScalarLongAsync(
+            """
+            SELECT COUNT(*)
+            FROM outbox_events
+            WHERE delivered_at_ms IS NULL
+              AND claimed_until_ms IS NOT NULL
+              AND claimed_until_ms <= @now_ms;
+            """,
+            cancellationToken,
+            ("@now_ms", nowMs)).ConfigureAwait(false);
+        var readyUnclaimed = await runtime.ScalarLongAsync(
+            """
+            SELECT COUNT(*)
+            FROM outbox_events
+            WHERE delivered_at_ms IS NULL
+              AND available_at_ms <= @now_ms
+              AND claimed_until_ms IS NULL;
+            """,
+            cancellationToken,
+            ("@now_ms", nowMs)).ConfigureAwait(false);
 
         var allHeadsRunning = snapshot.Heads.All(head => head.IsRunning);
         var allStorageRunning = snapshot.StorageNodes.All(node => node.IsRunning);
@@ -175,9 +195,7 @@ internal sealed class LocalRuntimeRecoveryReadinessProbe(LocalCluster runtime) :
             tenantCount > 0 && allHeadsRunning && allStorageRunning && storageCapacityValid
                 ? new("metadata_invariants", RecoveryReadinessEvaluator.Passed, "local_runtime_consistent")
                 : new("metadata_invariants", RecoveryReadinessEvaluator.Failed, "local_runtime_inconsistent"),
-            pendingOutbox == 0
-                ? new("outbox_reconciliation", RecoveryReadinessEvaluator.Passed, "no_pending_outbox")
-                : new("outbox_reconciliation", RecoveryReadinessEvaluator.Failed, "pending_outbox"),
+            BuildOutboxGate(expiredClaims, readyUnclaimed),
             auditEvents > 0
                 ? new("audit_continuity", RecoveryReadinessEvaluator.Passed, "audit_present")
                 : new("audit_continuity", RecoveryReadinessEvaluator.Failed, "audit_missing"),
@@ -190,4 +208,31 @@ internal sealed class LocalRuntimeRecoveryReadinessProbe(LocalCluster runtime) :
 
         return new RecoveryReadinessProbeSnapshot(operationalSummary, gates);
     }
+
+    private static RecoveryGateProbeResult BuildOutboxGate(long expiredClaims, long readyUnclaimed)
+    {
+        if (expiredClaims > 0)
+        {
+            return new(
+                "outbox_reconciliation",
+                RecoveryReadinessEvaluator.Failed,
+                $"expired_outbox_claims={BoundedCount(expiredClaims)}");
+        }
+
+        if (readyUnclaimed > 0)
+        {
+            return new(
+                "outbox_reconciliation",
+                RecoveryReadinessEvaluator.Failed,
+                $"ready_unclaimed_outbox={BoundedCount(readyUnclaimed)}");
+        }
+
+        return new(
+            "outbox_reconciliation",
+            RecoveryReadinessEvaluator.Passed,
+            "no_reclaimable_outbox");
+    }
+
+    private static string BoundedCount(long count) =>
+        count > 999_999 ? "999999+" : count.ToString(System.Globalization.CultureInfo.InvariantCulture);
 }

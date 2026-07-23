@@ -29,6 +29,7 @@ await cluster.StartAsync();
 
 builder.Services.AddSingleton<LocalRuntimeMetrics>();
 builder.Services.AddSingleton(cluster);
+builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<RecoveryReadinessOptions>();
 builder.Services.AddSingleton<IRecoveryReadinessProbe, LocalRuntimeRecoveryReadinessProbe>();
 builder.Services.AddSingleton<RecoveryReadinessEvaluator>();
