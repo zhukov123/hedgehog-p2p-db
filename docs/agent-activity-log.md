@@ -11,7 +11,7 @@
   - `dotnet test Hedgehog.sln`
   - `dotnet run --project tools/Hedgehog.Xtask -- run-local-runtime-smoke`
 - Container coverage: not run for this branch; the in-process local runtime smoke covered two heads and three storage nodes.
-- PR: pending.
+- PR: https://github.com/zhukov123/hedgehog-p2p-db/pull/43
 - Next candidate task: implement `revoke_actor_or_node` or start the `Hedgehog.Repair` worker skeleton around the existing repair lease workflow.
 
 ## 2026-07-13 - claim outbox workflow
