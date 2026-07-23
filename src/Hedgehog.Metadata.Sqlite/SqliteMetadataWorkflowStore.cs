@@ -2,6 +2,7 @@ using System.Data;
 using System.Data.Common;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Hedgehog.Metadata.Core;
 using Hedgehog.Types;
 
@@ -1160,6 +1161,96 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
         }
     }
 
+    public async Task<SqliteWorkflowResult> RevokeActorOrNodeAsync(
+        IDbConnection connection,
+        SqliteRevokeActorOrNodeRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateRevokeActorOrNode(request);
+        var db = RequireDbConnection(connection);
+        await EnsureOpenAsync(db, cancellationToken).ConfigureAwait(false);
+        await using var transaction = await db.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            var replay = await TryBeginIdempotencyAsync(
+                db,
+                transaction,
+                request.IdempotencyKey,
+                request.TenantId,
+                datasetId: null,
+                MetadataWorkflowNames.RevokeActorOrNode,
+                request.RevokedByActorId,
+                request,
+                request.RevokedAt,
+                cancellationToken).ConfigureAwait(false);
+
+            if (replay)
+            {
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                return new SqliteWorkflowResult(MetadataWorkflowNames.RevokeActorOrNode, "replayed", Replayed: true, []);
+            }
+
+            var revokerExists = await ScalarLongAsync(
+                db,
+                transaction,
+                """
+                SELECT COUNT(*)
+                FROM actors
+                WHERE actor_id = @actor_id
+                  AND tenant_id = @tenant_id
+                  AND state = 'active';
+                """,
+                cancellationToken,
+                ("@actor_id", request.RevokedByActorId),
+                ("@tenant_id", request.TenantId)).ConfigureAwait(false);
+            if (revokerExists != 1)
+            {
+                throw new InvalidOperationException("Revocation actor was not found or is not active.");
+            }
+
+            var (targetState, outboxTopic) = request.TargetKind switch
+            {
+                "actor" => (await RevokeActorAsync(db, transaction, request, cancellationToken).ConfigureAwait(false), "security.actor.revoked"),
+                "node" => (await RevokeNodeAsync(db, transaction, request, cancellationToken).ConfigureAwait(false), "security.node.revoked"),
+                _ => throw new ArgumentOutOfRangeException(nameof(request), request.TargetKind, "Target kind must be 'actor' or 'node'."),
+            };
+
+            await AppendOutboxAsync(
+                db,
+                transaction,
+                MetadataWorkflowNames.RevokeActorOrNode,
+                outboxTopic,
+                destinationNodeId: null,
+                idempotencyKey: request.IdempotencyKey,
+                payload: JsonSerializer.SerializeToUtf8Bytes(new
+                {
+                    request.TenantId,
+                    request.TargetKind,
+                    request.TargetId,
+                    request.RevokedByActorId,
+                    request.Reason,
+                    RevokedAt = request.RevokedAt,
+                }),
+                availableAt: request.RevokedAt,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+
+            await CompleteIdempotencyAsync(db, transaction, request.IdempotencyKey, request.RevokedAt, cancellationToken)
+                .ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return new SqliteWorkflowResult(
+                MetadataWorkflowNames.RevokeActorOrNode,
+                targetState,
+                Replayed: false,
+                [outboxTopic]);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
+    }
+
     public async Task<SqliteClaimOutboxResult> ClaimOutboxAsync(
         IDbConnection connection,
         SqliteClaimOutboxRequest request,
@@ -1198,6 +1289,153 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
             await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
             throw;
         }
+    }
+
+    private static async Task<string> RevokeActorAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        SqliteRevokeActorOrNodeRequest request,
+        CancellationToken cancellationToken)
+    {
+        var rows = await ExecuteAsync(
+            connection,
+            transaction,
+            """
+            UPDATE actors
+            SET state = 'revoked',
+                revoked_at_ms = @revoked_at_ms
+            WHERE actor_id = @target_id
+              AND tenant_id = @tenant_id
+              AND state = 'active';
+            """,
+            cancellationToken,
+            ("@target_id", request.TargetId),
+            ("@tenant_id", request.TenantId),
+            ("@revoked_at_ms", ToUnixMs(request.RevokedAt))).ConfigureAwait(false);
+
+        if (rows != 1)
+        {
+            throw new InvalidOperationException("Target actor was not found in an active revocable state.");
+        }
+
+        await ExecuteAsync(
+            connection,
+            transaction,
+            """
+            UPDATE invitations
+            SET state = 'revoked',
+                revoked_at_ms = @revoked_at_ms
+            WHERE tenant_id = @tenant_id
+              AND state = 'active'
+              AND (
+                  created_by_actor_id = @target_id
+                  OR accepted_by_actor_id = @target_id
+              );
+            """,
+            cancellationToken,
+            ("@target_id", request.TargetId),
+            ("@tenant_id", request.TenantId),
+            ("@revoked_at_ms", ToUnixMs(request.RevokedAt))).ConfigureAwait(false);
+
+        await AppendActorAuditAsync(
+            connection,
+            transaction,
+            MetadataWorkflowNames.RevokeActorOrNode,
+            "allowed",
+            request.TargetId,
+            request.IdempotencyKey,
+            request.RevokedAt,
+            cancellationToken).ConfigureAwait(false);
+
+        return "actor_revoked";
+    }
+
+    private static async Task<string> RevokeNodeAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        SqliteRevokeActorOrNodeRequest request,
+        CancellationToken cancellationToken)
+    {
+        var rows = await ExecuteAsync(
+            connection,
+            transaction,
+            """
+            UPDATE nodes
+            SET state = 'revoked',
+                retired_at_ms = @revoked_at_ms,
+                last_seen_at_ms = @revoked_at_ms
+            WHERE node_id = @target_id
+              AND tenant_id = @tenant_id
+              AND state IN ('joining', 'active', 'draining', 'quarantined');
+            """,
+            cancellationToken,
+            ("@target_id", request.TargetId),
+            ("@tenant_id", request.TenantId),
+            ("@revoked_at_ms", ToUnixMs(request.RevokedAt))).ConfigureAwait(false);
+
+        if (rows != 1)
+        {
+            throw new InvalidOperationException("Target node was not found in a revocable state.");
+        }
+
+        await ExecuteAsync(
+            connection,
+            transaction,
+            """
+            UPDATE node_keys
+            SET state = 'revoked',
+                revoked_at_ms = @revoked_at_ms
+            WHERE node_id = @target_id
+              AND state = 'active';
+            """,
+            cancellationToken,
+            ("@target_id", request.TargetId),
+            ("@revoked_at_ms", ToUnixMs(request.RevokedAt))).ConfigureAwait(false);
+
+        await ExecuteAsync(
+            connection,
+            transaction,
+            """
+            UPDATE replicas
+            SET state = 'suspect',
+                updated_at_ms = @revoked_at_ms
+            WHERE node_id = @target_id
+              AND state = 'healthy';
+            """,
+            cancellationToken,
+            ("@target_id", request.TargetId),
+            ("@revoked_at_ms", ToUnixMs(request.RevokedAt))).ConfigureAwait(false);
+
+        await ExecuteAsync(
+            connection,
+            transaction,
+            """
+            UPDATE object_versions
+            SET state = 'under_replicated',
+                updated_at_ms = @revoked_at_ms
+            WHERE state = 'committed'
+              AND version_id IN (
+                  SELECT version_id
+                  FROM replicas
+                  WHERE node_id = @target_id
+                    AND state = 'suspect'
+              );
+            """,
+            cancellationToken,
+            ("@target_id", request.TargetId),
+            ("@revoked_at_ms", ToUnixMs(request.RevokedAt))).ConfigureAwait(false);
+
+        await AppendNodeAuditAsync(
+            connection,
+            transaction,
+            MetadataWorkflowNames.RevokeActorOrNode,
+            "allowed",
+            request.TargetId,
+            request.IdempotencyKey,
+            request.RevokedAt,
+            cancellationToken).ConfigureAwait(false);
+
+        return "node_revoked";
     }
 
     private static async Task<IReadOnlyList<SqliteClaimedOutboxEvent>> ClaimOutboxRowsAsync(
@@ -1391,6 +1629,86 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
             ("@actor_id", actorId),
             ("@object_id", objectId),
             ("@version_id", versionId),
+            ("@idempotency_key", idempotencyKey),
+            ("@occurred_at_ms", ToUnixMs(occurredAt)));
+
+    private static Task AppendOutboxAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        string workflow,
+        string topic,
+        string? destinationNodeId,
+        string idempotencyKey,
+        byte[] payload,
+        DateTimeOffset availableAt,
+        CancellationToken cancellationToken) =>
+        ExecuteAsync(
+            connection,
+            transaction,
+            """
+            INSERT INTO outbox_events (
+                outbox_id,
+                workflow,
+                destination_node_id,
+                topic,
+                payload,
+                idempotency_key,
+                available_at_ms,
+                created_at_ms
+            )
+            VALUES (
+                @outbox_id,
+                @workflow,
+                @destination_node_id,
+                @topic,
+                @payload,
+                @idempotency_key,
+                @available_at_ms,
+                @created_at_ms
+            );
+            """,
+            cancellationToken,
+            ("@outbox_id", $"outbox:{idempotencyKey}"),
+            ("@workflow", workflow),
+            ("@destination_node_id", destinationNodeId),
+            ("@topic", topic),
+            ("@payload", payload),
+            ("@idempotency_key", idempotencyKey),
+            ("@available_at_ms", ToUnixMs(availableAt)),
+            ("@created_at_ms", ToUnixMs(availableAt)));
+
+    private static Task AppendActorAuditAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        string workflow,
+        string decision,
+        string actorId,
+        string idempotencyKey,
+        DateTimeOffset occurredAt,
+        CancellationToken cancellationToken) =>
+        ExecuteAsync(
+            connection,
+            transaction,
+            """
+            INSERT INTO audit_events (
+                workflow,
+                decision,
+                actor_id,
+                idempotency_key,
+                occurred_at_ms
+            )
+            VALUES (
+                @workflow,
+                @decision,
+                @actor_id,
+                @idempotency_key,
+                @occurred_at_ms
+            );
+            """,
+            cancellationToken,
+            ("@workflow", workflow),
+            ("@decision", decision),
+            ("@actor_id", actorId),
             ("@idempotency_key", idempotencyKey),
             ("@occurred_at_ms", ToUnixMs(occurredAt)));
 
@@ -1618,6 +1936,20 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
         RequireText(request.IdempotencyKey, nameof(request.IdempotencyKey));
         RequireKnownLabel(Labels.CapacityPressureStates, request.CapacityPressure, nameof(request.CapacityPressure));
         RequireCapacityAccounting(request);
+    }
+
+    private static void ValidateRevokeActorOrNode(SqliteRevokeActorOrNodeRequest request)
+    {
+        RequireText(request.TenantId, nameof(request.TenantId));
+        RequireText(request.TargetKind, nameof(request.TargetKind));
+        RequireText(request.TargetId, nameof(request.TargetId));
+        RequireText(request.RevokedByActorId, nameof(request.RevokedByActorId));
+        RequireText(request.Reason, nameof(request.Reason));
+        RequireText(request.IdempotencyKey, nameof(request.IdempotencyKey));
+        if (request.TargetKind is not ("actor" or "node"))
+        {
+            throw new ArgumentOutOfRangeException(nameof(request.TargetKind), request.TargetKind, "Target kind must be 'actor' or 'node'.");
+        }
     }
 
     private static void ValidateClaimOutbox(SqliteClaimOutboxRequest request)
