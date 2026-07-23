@@ -27,6 +27,7 @@ await WriteLifecyclePersistsCoherentMetadataAsync(connection);
 await DeleteMarkerPersistsTombstoneAsync(connection);
 await RemainingWorkflowSetPersistsCoherentMetadataAsync(connection);
 await ClaimOutboxClaimsEligibleEventsAsync(connection);
+await EvaluateRecoveryGateRollsUpStoreStateAsync(connection);
 await CapacityReportRejectsInvalidAccountingAsync(connection);
 await ExpireReservationRejectsEarlyExpiryAsync(connection);
 await AssertForeignKeyCheckCleanAsync(connection);
@@ -458,6 +459,82 @@ static async Task ClaimOutboxClaimsEligibleEventsAsync(SqliteConnection connecti
     Equal("outbox-unexpired", expiredClaim.Events[0].OutboxId);
     Equal(1, expiredClaim.Events[0].AttemptCount);
     Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM outbox_events WHERE outbox_id = 'outbox-unexpired' AND claimed_by = 'node-a';"));
+}
+
+static async Task EvaluateRecoveryGateRollsUpStoreStateAsync(SqliteConnection connection)
+{
+    var workflowStore = SqliteMetadataAuthority.CreateWorkflowStore();
+    var now = new DateTimeOffset(2026, 1, 2, 6, 45, 0, TimeSpan.Zero);
+    var nowMs = now.ToUnixTimeMilliseconds();
+
+    await ExecuteAsync(
+        connection,
+        """
+        UPDATE nodes
+        SET capacity_pressure = 'emergency',
+            last_seen_at_ms = @now_ms
+        WHERE node_id = 'node-a';
+
+        UPDATE nodes
+        SET capacity_pressure = 'normal',
+            last_seen_at_ms = @now_ms
+        WHERE node_id = 'node-b';
+        """,
+        ("@now_ms", nowMs));
+
+    var emergency = await workflowStore.EvaluateRecoveryGateAsync(
+        connection,
+        new SqliteEvaluateRecoveryGateRequest(
+            now,
+            TimeSpan.FromMinutes(5),
+            "idem-evaluate-recovery-emergency",
+            ActorId: "actor-a"));
+
+    Equal("degraded_read_only", emergency.State);
+    Equal("recovery_gate.changed", emergency.OutboxTopics.Single());
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM metadata_store WHERE store_id = 'default' AND capacity_pressure = 'emergency' AND degraded_mode = 'degraded_read_only';"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM audit_events WHERE workflow = 'evaluate_recovery_gate' AND actor_id = 'actor-a' AND idempotency_key = 'idem-evaluate-recovery-emergency';"));
+
+    var replay = await workflowStore.EvaluateRecoveryGateAsync(
+        connection,
+        new SqliteEvaluateRecoveryGateRequest(
+            now,
+            TimeSpan.FromMinutes(5),
+            "idem-evaluate-recovery-emergency",
+            ActorId: "actor-a"));
+    Equal(true, replay.Replayed);
+
+    await ExecuteAsync(
+        connection,
+        """
+        UPDATE nodes
+        SET capacity_pressure = 'normal',
+            last_seen_at_ms = @now_ms
+        WHERE node_id IN ('node-a', 'node-b');
+        """,
+        ("@now_ms", now.AddMinutes(1).ToUnixTimeMilliseconds()));
+
+    var normal = await workflowStore.EvaluateRecoveryGateAsync(
+        connection,
+        new SqliteEvaluateRecoveryGateRequest(
+            now.AddMinutes(1),
+            TimeSpan.FromMinutes(5),
+            "idem-evaluate-recovery-normal"));
+
+    Equal("normal", normal.State);
+    Equal("recovery_gate.changed", normal.OutboxTopics.Single());
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM metadata_store WHERE store_id = 'default' AND capacity_pressure = 'normal' AND degraded_mode = 'normal';"));
+
+    var stale = await workflowStore.EvaluateRecoveryGateAsync(
+        connection,
+        new SqliteEvaluateRecoveryGateRequest(
+            now.AddMinutes(10),
+            TimeSpan.FromMinutes(5),
+            "idem-evaluate-recovery-stale"));
+
+    Equal("authority_stale", stale.State);
+    Equal("recovery_gate.changed", stale.OutboxTopics.Single());
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM metadata_store WHERE store_id = 'default' AND capacity_pressure = 'normal' AND degraded_mode = 'authority_stale';"));
 }
 
 static async Task ExpireReservationRejectsEarlyExpiryAsync(SqliteConnection connection)
