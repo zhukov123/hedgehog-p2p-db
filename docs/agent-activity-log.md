@@ -1,5 +1,24 @@
 # Agent Activity Log
 
+## 2026-07-23 - runtime status path redaction
+
+- Branch: `agent/redact-runtime-status-paths-2026-07-23`
+- Task: stop `GET /runtime/status` from returning absolute runtime root and SQLite metadata paths; expose a bounded opaque runtime id plus metadata store type instead.
+- Tests:
+  - `dotnet build Hedgehog.sln`
+  - `dotnet run --project tools/Hedgehog.Xtask -- validate-scaffold-contract`
+  - `dotnet format Hedgehog.sln --verify-no-changes`
+  - `dotnet run --project tests/Hedgehog.LocalRuntime.Tests/Hedgehog.LocalRuntime.Tests.csproj`
+  - `dotnet run --project tests/Hedgehog.Admin.Api.Tests/Hedgehog.Admin.Api.Tests.csproj`
+  - `dotnet run --project tests/Hedgehog.Metadata.Core.Tests/Hedgehog.Metadata.Core.Tests.csproj`
+  - `dotnet run --project tests/Hedgehog.Metadata.Sqlite.Tests/Hedgehog.Metadata.Sqlite.Tests.csproj`
+  - `dotnet run --project tools/Hedgehog.Xtask -- run-local-runtime-smoke`
+  - `dotnet run --project tools/Hedgehog.Xtask -- run-local-runtime-stress`
+  - `dotnet run --project tools/Hedgehog.Xtask -- run-local-restore-drill`
+- Container coverage: `docker compose -f observability/docker-compose.yml config` passed. Starting the stack was blocked because the Docker Desktop Linux engine pipe was unavailable: `npipe:////./pipe/dockerDesktopLinuxEngine`.
+- PR: https://github.com/zhukov123/hedgehog-p2p-db/pull/41
+- Next candidate task: issue #29, wire admin recovery gates to the canonical readiness evaluator.
+
 ## 2026-07-13 - claim outbox workflow
 
 - Branch: `agent/claim-outbox-2026-07-13`

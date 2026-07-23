@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Text;
 using Hedgehog.Client;
 using Hedgehog.Head;
 using Hedgehog.LocalRuntime;
@@ -67,8 +69,8 @@ app.MapGet("/runtime/status", async (LocalCluster runtime, CancellationToken can
 {
     var snapshot = await runtime.SnapshotAsync(cancellationToken);
     return Results.Ok(new RuntimeStatusDto(
-        snapshot.RuntimeRoot,
-        snapshot.MetadataPath,
+        RuntimeId: CreateOpaqueRuntimeId(snapshot.RuntimeRoot),
+        MetadataStore: "sqlite",
         snapshot.Tenants,
         snapshot.Heads,
         snapshot.StorageNodes.Select(node => new StorageNodeStatusDto(
@@ -261,6 +263,12 @@ static async Task<HealthClusterDto> LoadClusterHealthAsync(
         recovery);
 }
 
+static string CreateOpaqueRuntimeId(string runtimeRoot)
+{
+    var hash = SHA256.HashData(Encoding.UTF8.GetBytes(Path.GetFullPath(runtimeRoot)));
+    return $"runtime-{Convert.ToHexString(hash.AsSpan(0, 8)).ToLowerInvariant()}";
+}
+
 public sealed record CreateTenantRequest(string TenantId, string DatasetId);
 
 public sealed record PutObjectRequest(string ClientId, string Name, string Text, bool PreferLastHead = false);
@@ -287,8 +295,8 @@ public sealed record HealthClusterDto(
 public sealed record TenantCreatedDto(string TenantId, string DatasetId, int RequiredReplicaCount);
 
 public sealed record RuntimeStatusDto(
-    string RuntimeRoot,
-    string MetadataPath,
+    string RuntimeId,
+    string MetadataStore,
     IReadOnlyList<LocalTenantSnapshot> Tenants,
     IReadOnlyList<HeadNodeSnapshot> Heads,
     IReadOnlyList<StorageNodeStatusDto> StorageNodes);
