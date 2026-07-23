@@ -1,5 +1,19 @@
 # Agent Activity Log
 
+## 2026-07-23 - recovery gate workflow
+
+- Branch: `agent/recovery-gate-workflow-2026-07-23`
+- Task: implement the SQLite metadata `evaluate_recovery_gate` workflow so recovery decisions are derived from canonical authority tables and emit durable audit/outbox evidence.
+- Tests:
+  - `dotnet test tests/Hedgehog.Metadata.Sqlite.Tests/Hedgehog.Metadata.Sqlite.Tests.csproj`
+  - `dotnet build Hedgehog.sln`
+  - `dotnet run --project tools/Hedgehog.Xtask -- validate-scaffold-contract`
+  - `dotnet test Hedgehog.sln`
+  - `dotnet run --project tools/Hedgehog.Xtask -- run-local-runtime-smoke`
+- Container coverage: not run for this branch; the in-process local runtime smoke covered two heads and three storage nodes.
+- PR: https://github.com/zhukov123/hedgehog-p2p-db/pull/43
+- Next candidate task: implement `revoke_actor_or_node` or start the `Hedgehog.Repair` worker skeleton around the existing repair lease workflow.
+
 ## 2026-07-13 - claim outbox workflow
 
 - Branch: `agent/claim-outbox-2026-07-13`

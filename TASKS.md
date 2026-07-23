@@ -81,7 +81,7 @@ Admin is not a later dashboard. For v1, admin status, repair visibility, audit r
   - [ ] accept invite
   - [ ] revoke actor or node
   - [x] claim outbox
-  - [ ] evaluate recovery gate
+  - [x] evaluate recovery gate
 - [ ] Add invariant queries and repair-readiness checks.
   - [x] Guard capacity reports against unknown pressure labels, impossible byte accounting, and missing nodes.
   - [x] Guard reservation expiry against premature expiry before the reservation TTL.

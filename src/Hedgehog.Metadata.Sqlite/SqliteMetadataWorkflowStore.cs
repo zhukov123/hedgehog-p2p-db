@@ -2,6 +2,7 @@ using System.Data;
 using System.Data.Common;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Hedgehog.Metadata.Core;
 using Hedgehog.Types;
 
@@ -1200,6 +1201,171 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
         }
     }
 
+    public async Task<SqliteEvaluateRecoveryGateResult> EvaluateRecoveryGateAsync(
+        IDbConnection connection,
+        SqliteEvaluateRecoveryGateRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateEvaluateRecoveryGate(request);
+        var db = RequireDbConnection(connection);
+        await EnsureOpenAsync(db, cancellationToken).ConfigureAwait(false);
+        await using var transaction = await db.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            var replay = await TryBeginIdempotencyAsync(
+                db,
+                transaction,
+                request.IdempotencyKey,
+                tenantId: null,
+                datasetId: null,
+                MetadataWorkflowNames.EvaluateRecoveryGate,
+                actorId: null,
+                request,
+                request.EvaluatedAt,
+                cancellationToken).ConfigureAwait(false);
+
+            if (replay)
+            {
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                return new SqliteEvaluateRecoveryGateResult(
+                    new SqliteWorkflowResult(MetadataWorkflowNames.EvaluateRecoveryGate, "replayed", Replayed: true, []),
+                    []);
+            }
+
+            var evaluatedAtMs = ToUnixMs(request.EvaluatedAt);
+            var maxOutboxLagMs = checked((long)request.MaxOutboxLag.TotalMilliseconds);
+            var gates = new List<SqliteRecoveryGateResult>();
+
+            var metadataStoreCount = await ScalarLongAsync(
+                db,
+                transaction,
+                "SELECT COUNT(*) FROM metadata_store WHERE store_id = 'default';",
+                cancellationToken).ConfigureAwait(false) ?? 0;
+            gates.Add(new SqliteRecoveryGateResult(
+                "metadata_store",
+                metadataStoreCount == 1,
+                metadataStoreCount == 1 ? "default_metadata_store_present" : "default_metadata_store_missing",
+                metadataStoreCount));
+
+            var workflowDefinitionCount = await ScalarLongAsync(
+                db,
+                transaction,
+                "SELECT COUNT(*) FROM workflow_definitions WHERE name = @workflow;",
+                cancellationToken,
+                ("@workflow", MetadataWorkflowNames.EvaluateRecoveryGate)).ConfigureAwait(false) ?? 0;
+            gates.Add(new SqliteRecoveryGateResult(
+                "workflow_definition",
+                workflowDefinitionCount == 1,
+                workflowDefinitionCount == 1 ? "evaluate_recovery_gate_registered" : "evaluate_recovery_gate_missing",
+                workflowDefinitionCount));
+
+            var oldestPendingOutboxMs = await ScalarLongAsync(
+                db,
+                transaction,
+                """
+                SELECT MIN(available_at_ms)
+                FROM outbox_events
+                WHERE delivered_at_ms IS NULL;
+                """,
+                cancellationToken).ConfigureAwait(false);
+            var outboxLagMs = oldestPendingOutboxMs is null ? 0 : Math.Max(0, evaluatedAtMs - oldestPendingOutboxMs.Value);
+            var outboxWithinThreshold = outboxLagMs <= maxOutboxLagMs;
+            gates.Add(new SqliteRecoveryGateResult(
+                "outbox_lag",
+                outboxWithinThreshold,
+                oldestPendingOutboxMs is null
+                    ? "no_pending_outbox"
+                    : outboxWithinThreshold
+                        ? "oldest_pending_outbox_within_threshold"
+                        : "oldest_pending_outbox_exceeds_threshold",
+                outboxLagMs));
+
+            var expiredLeaseCount = await ScalarLongAsync(
+                db,
+                transaction,
+                """
+                SELECT COUNT(*)
+                FROM leases
+                WHERE state = 'issued'
+                  AND expires_at_ms <= @evaluated_at_ms;
+                """,
+                cancellationToken,
+                ("@evaluated_at_ms", evaluatedAtMs)).ConfigureAwait(false) ?? 0;
+            gates.Add(new SqliteRecoveryGateResult(
+                "issued_leases_current",
+                expiredLeaseCount == 0,
+                expiredLeaseCount == 0 ? "no_expired_issued_leases" : "expired_issued_leases_block_recovery",
+                expiredLeaseCount));
+
+            var expiredReservationCount = await ScalarLongAsync(
+                db,
+                transaction,
+                """
+                SELECT COUNT(*)
+                FROM capacity_reservations
+                WHERE state IN ('pending', 'reserved', 'streaming', 'finalizing')
+                  AND expires_at_ms <= @evaluated_at_ms;
+                """,
+                cancellationToken,
+                ("@evaluated_at_ms", evaluatedAtMs)).ConfigureAwait(false) ?? 0;
+            gates.Add(new SqliteRecoveryGateResult(
+                "active_reservations_current",
+                expiredReservationCount == 0,
+                expiredReservationCount == 0 ? "no_expired_active_reservations" : "expired_active_reservations_block_recovery",
+                expiredReservationCount));
+
+            var ready = gates.All(static gate => gate.Passed);
+            var state = ready ? "ready" : "blocked";
+            var topic = ready ? "recovery.ready" : "recovery.blocked";
+
+            await AppendSystemAuditAsync(
+                db,
+                transaction,
+                MetadataWorkflowNames.EvaluateRecoveryGate,
+                ready ? "allowed" : "denied",
+                request.EvaluatedBy,
+                request.IdempotencyKey,
+                request.EvaluatedAt,
+                cancellationToken).ConfigureAwait(false);
+
+            await AppendOutboxAsync(
+                db,
+                transaction,
+                outboxId: $"recovery-gate-{request.IdempotencyKey}",
+                MetadataWorkflowNames.EvaluateRecoveryGate,
+                topic,
+                JsonSerializer.SerializeToUtf8Bytes(new
+                {
+                    evaluated_by = request.EvaluatedBy,
+                    evaluated_at_ms = evaluatedAtMs,
+                    state,
+                    gates = gates.Select(static gate => new
+                    {
+                        name = gate.Name,
+                        passed = gate.Passed,
+                        reason = gate.Reason,
+                        evidence_value = gate.EvidenceValue
+                    })
+                }),
+                request.IdempotencyKey,
+                request.EvaluatedAt,
+                cancellationToken).ConfigureAwait(false);
+
+            await CompleteIdempotencyAsync(db, transaction, request.IdempotencyKey, request.EvaluatedAt, cancellationToken)
+                .ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return new SqliteEvaluateRecoveryGateResult(
+                new SqliteWorkflowResult(MetadataWorkflowNames.EvaluateRecoveryGate, state, Replayed: false, [topic]),
+                gates);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
+    }
+
     private static async Task<IReadOnlyList<SqliteClaimedOutboxEvent>> ClaimOutboxRowsAsync(
         DbConnection connection,
         DbTransaction transaction,
@@ -1429,6 +1595,85 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
             ("@idempotency_key", idempotencyKey),
             ("@occurred_at_ms", ToUnixMs(occurredAt)));
 
+    private static Task AppendSystemAuditAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        string workflow,
+        string decision,
+        string correlationId,
+        string idempotencyKey,
+        DateTimeOffset occurredAt,
+        CancellationToken cancellationToken) =>
+        ExecuteAsync(
+            connection,
+            transaction,
+            """
+            INSERT INTO audit_events (
+                workflow,
+                decision,
+                correlation_id,
+                idempotency_key,
+                occurred_at_ms
+            )
+            VALUES (
+                @workflow,
+                @decision,
+                @correlation_id,
+                @idempotency_key,
+                @occurred_at_ms
+            );
+            """,
+            cancellationToken,
+            ("@workflow", workflow),
+            ("@decision", decision),
+            ("@correlation_id", correlationId),
+            ("@idempotency_key", idempotencyKey),
+            ("@occurred_at_ms", ToUnixMs(occurredAt)));
+
+    private static Task AppendOutboxAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        string outboxId,
+        string workflow,
+        string topic,
+        byte[] payload,
+        string idempotencyKey,
+        DateTimeOffset availableAt,
+        CancellationToken cancellationToken) =>
+        ExecuteAsync(
+            connection,
+            transaction,
+            """
+            INSERT INTO outbox_events (
+                outbox_id,
+                workflow,
+                destination_node_id,
+                topic,
+                payload,
+                idempotency_key,
+                available_at_ms,
+                created_at_ms
+            )
+            VALUES (
+                @outbox_id,
+                @workflow,
+                NULL,
+                @topic,
+                @payload,
+                @idempotency_key,
+                @available_at_ms,
+                @created_at_ms
+            );
+            """,
+            cancellationToken,
+            ("@outbox_id", outboxId),
+            ("@workflow", workflow),
+            ("@topic", topic),
+            ("@payload", payload),
+            ("@idempotency_key", idempotencyKey),
+            ("@available_at_ms", ToUnixMs(availableAt)),
+            ("@created_at_ms", ToUnixMs(availableAt)));
+
     private static async Task<int> ExecuteAsync(
         DbConnection connection,
         DbTransaction transaction,
@@ -1634,6 +1879,13 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
         {
             RequireText(request.Topic, nameof(request.Topic));
         }
+    }
+
+    private static void ValidateEvaluateRecoveryGate(SqliteEvaluateRecoveryGateRequest request)
+    {
+        RequireText(request.EvaluatedBy, nameof(request.EvaluatedBy));
+        RequirePositive(request.MaxOutboxLag, nameof(request.MaxOutboxLag));
+        RequireText(request.IdempotencyKey, nameof(request.IdempotencyKey));
     }
 
     private static void RequireKnownLabel(IReadOnlyList<LabelSpec> labels, string value, string name)
