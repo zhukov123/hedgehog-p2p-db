@@ -1160,6 +1160,223 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
         }
     }
 
+    public async Task<SqliteWorkflowResult> AcceptInviteAsync(
+        IDbConnection connection,
+        SqliteAcceptInviteRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateAcceptInvite(request);
+        var db = RequireDbConnection(connection);
+        await EnsureOpenAsync(db, cancellationToken).ConfigureAwait(false);
+        await using var transaction = await db.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            var replay = await TryBeginIdempotencyAsync(
+                db,
+                transaction,
+                request.IdempotencyKey,
+                request.TenantId,
+                datasetId: null,
+                MetadataWorkflowNames.AcceptInvite,
+                actorId: null,
+                request,
+                request.AcceptedAt,
+                cancellationToken).ConfigureAwait(false);
+
+            if (replay)
+            {
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+                return new SqliteWorkflowResult(MetadataWorkflowNames.AcceptInvite, "replayed", Replayed: true, []);
+            }
+
+            var invitationExists = await ScalarLongAsync(
+                db,
+                transaction,
+                """
+                SELECT COUNT(*)
+                FROM invitations
+                WHERE invitation_id = @invitation_id
+                  AND tenant_id = @tenant_id
+                  AND state = 'active'
+                  AND use_count < max_uses
+                  AND (expires_at_ms IS NULL OR expires_at_ms > @accepted_at_ms);
+                """,
+                cancellationToken,
+                ("@invitation_id", request.InvitationId),
+                ("@tenant_id", request.TenantId),
+                ("@accepted_at_ms", ToUnixMs(request.AcceptedAt))).ConfigureAwait(false);
+
+            if (invitationExists != 1)
+            {
+                throw new InvalidOperationException("Invitation was not found in an active, unexpired, usable state.");
+            }
+
+            if (string.Equals(request.AcceptedEntityKind, "actor", StringComparison.Ordinal))
+            {
+                await ExecuteAsync(
+                    db,
+                    transaction,
+                    """
+                    INSERT INTO actors (
+                        actor_id,
+                        tenant_id,
+                        display_name,
+                        actor_kind,
+                        public_key_fingerprint,
+                        state,
+                        created_at_ms
+                    )
+                    VALUES (
+                        @actor_id,
+                        @tenant_id,
+                        @display_name,
+                        @actor_kind,
+                        @public_key_fingerprint,
+                        'active',
+                        @created_at_ms
+                    );
+                    """,
+                    cancellationToken,
+                    ("@actor_id", request.EntityId),
+                    ("@tenant_id", request.TenantId),
+                    ("@display_name", request.DisplayName),
+                    ("@actor_kind", request.ActorKind),
+                    ("@public_key_fingerprint", request.PublicKeyFingerprint),
+                    ("@created_at_ms", ToUnixMs(request.AcceptedAt))).ConfigureAwait(false);
+
+                await AppendActorAuditAsync(
+                    db,
+                    transaction,
+                    MetadataWorkflowNames.AcceptInvite,
+                    "allowed",
+                    request.EntityId,
+                    request.IdempotencyKey,
+                    request.AcceptedAt,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                await ExecuteAsync(
+                    db,
+                    transaction,
+                    """
+                    INSERT INTO nodes (
+                        node_id,
+                        tenant_id,
+                        display_name,
+                        advertise_endpoint,
+                        trust_domain,
+                        public_key_fingerprint,
+                        state,
+                        joined_at_ms,
+                        last_seen_at_ms
+                    )
+                    VALUES (
+                        @node_id,
+                        @tenant_id,
+                        @display_name,
+                        @advertise_endpoint,
+                        @trust_domain,
+                        @public_key_fingerprint,
+                        'active',
+                        @joined_at_ms,
+                        @joined_at_ms
+                    );
+                    """,
+                    cancellationToken,
+                    ("@node_id", request.EntityId),
+                    ("@tenant_id", request.TenantId),
+                    ("@display_name", request.DisplayName),
+                    ("@advertise_endpoint", request.AdvertiseEndpoint),
+                    ("@trust_domain", request.TrustDomain),
+                    ("@public_key_fingerprint", request.PublicKeyFingerprint),
+                    ("@joined_at_ms", ToUnixMs(request.AcceptedAt))).ConfigureAwait(false);
+
+                await ExecuteAsync(
+                    db,
+                    transaction,
+                    """
+                    INSERT INTO node_keys (
+                        node_key_id,
+                        node_id,
+                        key_id,
+                        public_key_fingerprint,
+                        state,
+                        created_at_ms
+                    )
+                    VALUES (
+                        @node_key_id,
+                        @node_id,
+                        @key_id,
+                        @public_key_fingerprint,
+                        'active',
+                        @created_at_ms
+                    );
+                    """,
+                    cancellationToken,
+                    ("@node_key_id", $"{request.EntityId}:{request.NodeKeyId}"),
+                    ("@node_id", request.EntityId),
+                    ("@key_id", request.NodeKeyId),
+                    ("@public_key_fingerprint", request.PublicKeyFingerprint),
+                    ("@created_at_ms", ToUnixMs(request.AcceptedAt))).ConfigureAwait(false);
+
+                await AppendNodeAuditAsync(
+                    db,
+                    transaction,
+                    MetadataWorkflowNames.AcceptInvite,
+                    "allowed",
+                    request.EntityId,
+                    request.IdempotencyKey,
+                    request.AcceptedAt,
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            var invitationRows = await ExecuteAsync(
+                db,
+                transaction,
+                """
+                UPDATE invitations
+                SET state = CASE
+                        WHEN use_count + 1 >= max_uses THEN 'accepted'
+                        ELSE 'active'
+                    END,
+                    accepted_by_actor_id = CASE
+                        WHEN @accepted_entity_kind = 'actor' THEN @entity_id
+                        ELSE accepted_by_actor_id
+                    END,
+                    use_count = use_count + 1,
+                    accepted_at_ms = @accepted_at_ms
+                WHERE invitation_id = @invitation_id
+                  AND tenant_id = @tenant_id
+                  AND state = 'active'
+                  AND use_count < max_uses
+                  AND (expires_at_ms IS NULL OR expires_at_ms > @accepted_at_ms);
+                """,
+                cancellationToken,
+                ("@invitation_id", request.InvitationId),
+                ("@tenant_id", request.TenantId),
+                ("@accepted_entity_kind", request.AcceptedEntityKind),
+                ("@entity_id", request.EntityId),
+                ("@accepted_at_ms", ToUnixMs(request.AcceptedAt))).ConfigureAwait(false);
+
+            if (invitationRows != 1)
+            {
+                throw new InvalidOperationException("Invitation state changed before acceptance could be recorded.");
+            }
+
+            await CompleteIdempotencyAsync(db, transaction, request.IdempotencyKey, request.AcceptedAt, cancellationToken)
+                .ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            return new SqliteWorkflowResult(MetadataWorkflowNames.AcceptInvite, "accepted", Replayed: false, ["invite.accepted"]);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
+    }
+
     public async Task<SqliteClaimOutboxResult> ClaimOutboxAsync(
         IDbConnection connection,
         SqliteClaimOutboxRequest request,
@@ -1429,6 +1646,41 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
             ("@idempotency_key", idempotencyKey),
             ("@occurred_at_ms", ToUnixMs(occurredAt)));
 
+    private static Task AppendActorAuditAsync(
+        DbConnection connection,
+        DbTransaction transaction,
+        string workflow,
+        string decision,
+        string actorId,
+        string idempotencyKey,
+        DateTimeOffset occurredAt,
+        CancellationToken cancellationToken) =>
+        ExecuteAsync(
+            connection,
+            transaction,
+            """
+            INSERT INTO audit_events (
+                workflow,
+                decision,
+                actor_id,
+                idempotency_key,
+                occurred_at_ms
+            )
+            VALUES (
+                @workflow,
+                @decision,
+                @actor_id,
+                @idempotency_key,
+                @occurred_at_ms
+            );
+            """,
+            cancellationToken,
+            ("@workflow", workflow),
+            ("@decision", decision),
+            ("@actor_id", actorId),
+            ("@idempotency_key", idempotencyKey),
+            ("@occurred_at_ms", ToUnixMs(occurredAt)));
+
     private static async Task<int> ExecuteAsync(
         DbConnection connection,
         DbTransaction transaction,
@@ -1620,6 +1872,36 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
         RequireCapacityAccounting(request);
     }
 
+    private static void ValidateAcceptInvite(SqliteAcceptInviteRequest request)
+    {
+        RequireText(request.TenantId, nameof(request.TenantId));
+        RequireText(request.InvitationId, nameof(request.InvitationId));
+        RequireText(request.AcceptedEntityKind, nameof(request.AcceptedEntityKind));
+        RequireText(request.EntityId, nameof(request.EntityId));
+        RequireText(request.DisplayName, nameof(request.DisplayName));
+        RequireText(request.PublicKeyFingerprint, nameof(request.PublicKeyFingerprint));
+        RequireText(request.IdempotencyKey, nameof(request.IdempotencyKey));
+
+        if (string.Equals(request.AcceptedEntityKind, "actor", StringComparison.Ordinal))
+        {
+            RequireText(request.ActorKind ?? string.Empty, nameof(request.ActorKind));
+            RequireKnownActorKind(request.ActorKind!);
+            return;
+        }
+
+        if (string.Equals(request.AcceptedEntityKind, "node", StringComparison.Ordinal))
+        {
+            RequireText(request.NodeKeyId ?? string.Empty, nameof(request.NodeKeyId));
+            RequireText(request.TrustDomain ?? string.Empty, nameof(request.TrustDomain));
+            return;
+        }
+
+        throw new ArgumentOutOfRangeException(
+            nameof(request.AcceptedEntityKind),
+            request.AcceptedEntityKind,
+            "Accepted entity kind must be 'actor' or 'node'.");
+    }
+
     private static void ValidateClaimOutbox(SqliteClaimOutboxRequest request)
     {
         RequireText(request.ClaimedBy, nameof(request.ClaimedBy));
@@ -1633,6 +1915,14 @@ public sealed class SqliteMetadataWorkflowStore : ISqliteMetadataWorkflowStore
         if (request.Topic is not null)
         {
             RequireText(request.Topic, nameof(request.Topic));
+        }
+    }
+
+    private static void RequireKnownActorKind(string actorKind)
+    {
+        if (actorKind is not ("user" or "admin" or "head" or "agent" or "system"))
+        {
+            throw new ArgumentOutOfRangeException(nameof(actorKind), actorKind, "Actor kind must be a known label value.");
         }
     }
 

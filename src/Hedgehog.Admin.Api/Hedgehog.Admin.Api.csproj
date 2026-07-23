@@ -1,2 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
+  <ItemGroup>
+    <ProjectReference Include="../Hedgehog.LocalRuntime.Api/Hedgehog.LocalRuntime.Api.csproj" />
+  </ItemGroup>
 </Project>

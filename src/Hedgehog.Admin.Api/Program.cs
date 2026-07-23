@@ -217,5 +217,8 @@ static IResult ApplyGuardedAction(
         });
     }
 
-    return Results.Ok(repository.ApplyAction(targetType, targetId, action, request));
+    var result = repository.ApplyAction(targetType, targetId, action, request);
+    return result.Result == "rejected"
+        ? Results.Conflict(result)
+        : Results.Ok(result);
 }

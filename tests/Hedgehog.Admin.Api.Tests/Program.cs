@@ -1,4 +1,5 @@
 using Hedgehog.Admin.Api;
+using Hedgehog.LocalRuntime.Api;
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Hosting;
@@ -11,7 +12,7 @@ ObjectQueriesUseOpaqueIds(repository);
 ClusterActionsWriteAudit(repository);
 NodeActionsUpdateState(repository);
 RepairActionsUseCanonicalStates(repository);
-RecoveryGateActionsRequireApprovals(repository);
+RecoveryGateActionsAreReadOnly(repository);
 await AdminEndpointsServeOperationalContractsAsync();
 
 Console.WriteLine("Hedgehog.Admin.Api.Tests passed.");
@@ -84,18 +85,29 @@ static void RepairActionsUseCanonicalStates(AdminRepository repository)
     Equal("canceled_superseded", canceled.State);
 }
 
-static void RecoveryGateActionsRequireApprovals(AdminRepository repository)
+static void RecoveryGateActionsAreReadOnly(AdminRepository repository)
 {
-    var gate = repository.GetRecoveryGates().Single(item => item.GateId == "gate-capacity-emergency");
-    var approvals = gate.Approvals;
+    var before = repository.GetRecoveryGates();
+    Equal(
+        string.Join(",", RecoveryReadinessEvaluator.CanonicalGateNames),
+        string.Join(",", before.Select(gate => gate.GateId)));
+    True(before.All(gate => gate.State == RecoveryReadinessEvaluator.Unknown), "admin recovery gates should be projection-only unknowns until the canonical evaluator is wired in");
 
-    repository.ApplyAction("recovery-gate", gate.GateId, "approve", new ActionRequestDto("admin-test", "approve test"));
-    var approved = repository.GetRecoveryGates().Single(item => item.GateId == gate.GateId);
-    Equal(approvals + 1, approved.Approvals);
+    foreach (var action in new[] { "approve", "acknowledge", "close" })
+    {
+        var result = repository.ApplyAction(
+            "recovery-gate",
+            before[0].GateId,
+            action,
+            new ActionRequestDto("admin-test", $"{action} test"));
+        Equal("rejected", result.Result);
+        Equal(AdminRepository.RecoveryGateActionRejectedReason, result.Reason);
+    }
 
-    repository.ApplyAction("recovery-gate", gate.GateId, "acknowledge", new ActionRequestDto("admin-test", "acknowledge test"));
-    var acknowledged = repository.GetRecoveryGates().Single(item => item.GateId == gate.GateId);
-    Equal("closed", acknowledged.State);
+    var after = repository.GetRecoveryGates();
+    Equal(
+        string.Join("|", before.Select(StableRecoveryGateProjection)),
+        string.Join("|", after.Select(StableRecoveryGateProjection)));
 }
 
 static async Task AdminEndpointsServeOperationalContractsAsync()
@@ -146,6 +158,9 @@ static async Task AdminEndpointsServeOperationalContractsAsync()
     var gates = await client.GetFromJsonAsync<IReadOnlyList<RecoveryGateDto>>("/admin/v1/recovery/gates")
         ?? throw new InvalidOperationException("recovery gates endpoint returned no payload");
     True(gates.Count > 0, "recovery gates endpoint should expose recovery gates");
+    Equal(
+        string.Join(",", RecoveryReadinessEvaluator.CanonicalGateNames),
+        string.Join(",", gates.Select(gate => gate.GateId)));
 
     var actionResponse = await client.PostAsJsonAsync(
         "/admin/v1/cluster/actions/pause-writes",
@@ -176,15 +191,40 @@ static async Task AdminEndpointsServeOperationalContractsAsync()
         new ActionRequestDto("admin-test", "endpoint retry", "endpoint-retry"));
     Equal(HttpStatusCode.OK, retryResponse.StatusCode);
 
-    var acknowledgeResponse = await client.PostAsJsonAsync(
-        "/admin/v1/recovery/gates/gate-capacity-emergency/actions/acknowledge",
-        new ActionRequestDto("admin-test", "endpoint acknowledge", "endpoint-acknowledge"));
-    Equal(HttpStatusCode.OK, acknowledgeResponse.StatusCode);
+    foreach (var actionName in new[] { "approve", "acknowledge", "close" })
+    {
+        var rejectedResponse = await client.PostAsJsonAsync(
+            $"/admin/v1/recovery/gates/{gates[0].GateId}/actions/{actionName}",
+            new ActionRequestDto("admin-test", $"endpoint {actionName}", $"endpoint-{actionName}"));
+        Equal(HttpStatusCode.Conflict, rejectedResponse.StatusCode);
+        var rejectedPayload = await rejectedResponse.Content.ReadAsStringAsync();
+        Equal(false, rejectedPayload.Contains("\\", StringComparison.Ordinal));
+        Equal(false, rejectedPayload.Contains("/", StringComparison.Ordinal));
+        Equal(false, rejectedPayload.Contains("runtime-root", StringComparison.OrdinalIgnoreCase));
+
+        var rejected = await rejectedResponse.Content.ReadFromJsonAsync<ActionResultDto>()
+            ?? throw new InvalidOperationException("rejected recovery-gate action endpoint returned no payload");
+        Equal("rejected", rejected.Result);
+        Equal(AdminRepository.RecoveryGateActionRejectedReason, rejected.Reason);
+    }
 
     var paused = await client.GetFromJsonAsync<ClusterStatusDto>("/admin/v1/cluster/status")
         ?? throw new InvalidOperationException("paused cluster status endpoint returned no payload");
     Equal("paused", paused.WriteMode);
 }
+
+static string StableRecoveryGateProjection(RecoveryGateDto gate) =>
+    string.Join(
+        ",",
+        gate.GateId,
+        gate.Name,
+        gate.State,
+        gate.Severity,
+        gate.Reason,
+        gate.RequiredApprovals,
+        gate.Approvals,
+        string.Join(":", gate.Blocks),
+        string.Join(":", gate.AllowedActions));
 
 static string FindRepoRoot()
 {

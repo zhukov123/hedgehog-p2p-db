@@ -78,7 +78,7 @@ Admin is not a later dashboard. For v1, admin status, repair visibility, audit r
   - [x] expire reservation
   - [x] cleanup conversion
   - [x] capacity report
-  - [ ] accept invite
+  - [x] accept invite
   - [ ] revoke actor or node
   - [x] claim outbox
   - [ ] evaluate recovery gate
@@ -139,6 +139,7 @@ Admin is not a later dashboard. For v1, admin status, repair visibility, audit r
 - [x] Add SQLite migration integration tests.
 - [x] Add SQLite integration tests for create write intent, complete replica, commit version, delete marker, lease repair, expire reservation, cleanup conversion, and capacity report.
 - [ ] Add SQLite integration tests for remaining workflows.
+  - [x] Accept invite actor/node acceptance, replay, audit, key persistence, and expired-invite rejection are covered in `Hedgehog.Metadata.Sqlite.Tests`.
   - [x] Claim outbox worker leasing, destination filtering, unexpired lease exclusion, and expired lease reclaim are covered in `Hedgehog.Metadata.Sqlite.Tests`.
 - [ ] Add storage-agent crash tests.
 - [x] Add admin repository contract tests.
