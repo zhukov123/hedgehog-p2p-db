@@ -23,6 +23,7 @@ await runner.ApplyMigrationsAsync(connection);
 Equal(6, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM __hedgehog_schema_migrations;"));
 
 await SeedAuthorityAsync(connection);
+await RecoveryGateEvaluatesBlockedAndReadyAsync(connection);
 await WriteLifecyclePersistsCoherentMetadataAsync(connection);
 await DeleteMarkerPersistsTombstoneAsync(connection);
 await RemainingWorkflowSetPersistsCoherentMetadataAsync(connection);
@@ -83,6 +84,90 @@ static async Task SeedAuthorityAsync(SqliteConnection connection)
             ('node-b', 'tenant-a', 'Node B', 'active', 1000000, 0, 0, 1000000, @now_ms, @now_ms);
         """,
         ("@now_ms", now));
+}
+
+static async Task RecoveryGateEvaluatesBlockedAndReadyAsync(SqliteConnection connection)
+{
+    var workflowStore = SqliteMetadataAuthority.CreateWorkflowStore();
+    var now = new DateTimeOffset(2026, 1, 2, 2, 30, 0, TimeSpan.Zero);
+
+    var ready = await workflowStore.EvaluateRecoveryGateAsync(
+        connection,
+        new SqliteEvaluateRecoveryGateRequest(
+            "head-a",
+            now,
+            TimeSpan.FromMinutes(10),
+            "idem-recovery-ready"));
+
+    Equal("ready", ready.WorkflowResult.State);
+    Equal(false, ready.WorkflowResult.Replayed);
+    Equal("recovery.ready", ready.WorkflowResult.OutboxTopics.Single());
+    Equal(true, ready.Gates.All(static gate => gate.Passed));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM audit_events WHERE workflow = 'evaluate_recovery_gate' AND decision = 'allowed' AND correlation_id = 'head-a';"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM outbox_events WHERE workflow = 'evaluate_recovery_gate' AND topic = 'recovery.ready';"));
+
+    var replay = await workflowStore.EvaluateRecoveryGateAsync(
+        connection,
+        new SqliteEvaluateRecoveryGateRequest(
+            "head-a",
+            now,
+            TimeSpan.FromMinutes(10),
+            "idem-recovery-ready"));
+    Equal(true, replay.WorkflowResult.Replayed);
+
+    await ExecuteAsync(
+        connection,
+        "UPDATE outbox_events SET delivered_at_ms = @now_ms WHERE workflow = 'evaluate_recovery_gate';",
+        ("@now_ms", now.ToUnixTimeMilliseconds()));
+
+    await ExecuteAsync(
+        connection,
+        """
+        INSERT INTO outbox_events (
+            outbox_id,
+            workflow,
+            destination_node_id,
+            topic,
+            payload,
+            idempotency_key,
+            available_at_ms,
+            delivered_at_ms,
+            created_at_ms
+        )
+        VALUES (
+            'stale-recovery-blocker',
+            'claim_outbox',
+            NULL,
+            'repair.leased',
+            X'010203',
+            'idem-stale-recovery-blocker',
+            @old_ms,
+            NULL,
+            @old_ms
+        );
+        """,
+        ("@old_ms", now.AddMinutes(-30).ToUnixTimeMilliseconds()));
+
+    var blocked = await workflowStore.EvaluateRecoveryGateAsync(
+        connection,
+        new SqliteEvaluateRecoveryGateRequest(
+            "head-a",
+            now,
+            TimeSpan.FromMinutes(10),
+            "idem-recovery-blocked"));
+
+    Equal("blocked", blocked.WorkflowResult.State);
+    Equal("recovery.blocked", blocked.WorkflowResult.OutboxTopics.Single());
+    var outboxGate = blocked.Gates.Single(gate => gate.Name == "outbox_lag");
+    Equal(false, outboxGate.Passed);
+    Equal("oldest_pending_outbox_exceeds_threshold", outboxGate.Reason);
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM audit_events WHERE workflow = 'evaluate_recovery_gate' AND decision = 'denied' AND correlation_id = 'head-a';"));
+    Equal(1, await ScalarIntAsync(connection, "SELECT COUNT(*) FROM outbox_events WHERE workflow = 'evaluate_recovery_gate' AND topic = 'recovery.blocked';"));
+
+    await ExecuteAsync(
+        connection,
+        "UPDATE outbox_events SET delivered_at_ms = @now_ms WHERE outbox_id = 'stale-recovery-blocker' OR workflow = 'evaluate_recovery_gate';",
+        ("@now_ms", now.ToUnixTimeMilliseconds()));
 }
 
 static async Task WriteLifecyclePersistsCoherentMetadataAsync(SqliteConnection connection)
