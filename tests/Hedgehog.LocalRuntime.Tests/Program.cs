@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using System.Net.Http.Json;
+using System.Text.Json.Nodes;
 
 var runtimeRoot = Path.Combine(Path.GetTempPath(), $"hedgehog-local-runtime-test-{Guid.NewGuid():N}");
 try
@@ -142,6 +143,17 @@ static async Task RuntimeApiHealthEndpointsAsync(string runtimeRoot)
     var clusterPayload = await client.GetStringAsync("/health/cluster");
     False(clusterPayload.Contains(runtimeRoot, StringComparison.Ordinal), "cluster health should not expose runtime root");
     False(clusterPayload.Contains("metadata", StringComparison.OrdinalIgnoreCase) && clusterPayload.Contains(".sqlite", StringComparison.OrdinalIgnoreCase), "cluster health should not expose metadata path");
+
+    var statusPayload = await client.GetStringAsync("/runtime/status");
+    False(statusPayload.Contains(runtimeRoot, StringComparison.Ordinal), "runtime status should not expose runtime root");
+    False(statusPayload.Contains("hedgehog.sqlite", StringComparison.OrdinalIgnoreCase), "runtime status should not expose metadata database path");
+    var status = JsonNode.Parse(statusPayload)
+        ?? throw new InvalidOperationException("runtime status endpoint returned invalid JSON");
+    Equal("sqlite", status["persistence"]?["metadataBackend"]?.GetValue<string>());
+    Equal(true, status["persistence"]?["metadataAvailable"]?.GetValue<bool>());
+    Equal(3, status["persistence"]?["storageNodeCount"]?.GetValue<int>());
+    Equal(null, status["runtimeRoot"]);
+    Equal(null, status["metadataPath"]);
 
     var metrics = await client.GetStringAsync("/metrics");
     True(metrics.Contains("hedgehog_runtime_recovery_ready 1", StringComparison.Ordinal), "metrics should render the same ready decision");
