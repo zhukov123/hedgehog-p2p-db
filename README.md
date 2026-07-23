@@ -160,6 +160,10 @@ curl -fsS http://localhost:5090/health/cluster
 
 `/health/ready` returns HTTP 200 only when metadata is queryable and all in-process heads and storage nodes are running. `/health/cluster` returns the same readiness contract with counts for tenants, heads, storage nodes, metadata availability, and the runtime paths.
 
+## SQLite Metadata Inspection
+
+`Hedgehog.Metadata.Sqlite` exposes a read-only metadata inspector for production gates and future repair workers. `CheckInvariantsAsync` reports FK-clean but unsafe states such as broken object current-version pointers, active objects with no current or writing version, committed versions below healthy-replica quorum, healthy replicas without hash confirmation, and impossible node capacity accounting. `ListRepairReadinessAsync` lists under-replicated versions and replicas that need suspect verification, replacement, or delete cleanup, including whether an active repair job already exists.
+
 ## Grafana Dashboard
 
 Start the local runtime API, then start Prometheus and Grafana:

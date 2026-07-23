@@ -145,6 +145,26 @@ public sealed record SqliteClaimOutboxResult(
     SqliteWorkflowResult WorkflowResult,
     IReadOnlyList<SqliteClaimedOutboxEvent> Events);
 
+public sealed record SqliteInvariantViolation(
+    string Code,
+    string Scope,
+    string EntityId,
+    string Severity,
+    string Details);
+
+public sealed record SqliteRepairReadinessCandidate(
+    string TenantId,
+    string DatasetId,
+    string ObjectId,
+    string VersionId,
+    string? ReplicaId,
+    string Kind,
+    int Priority,
+    string Reason,
+    int RequiredReplicaCount,
+    int HealthyReplicaCount,
+    bool HasActiveRepairJob);
+
 public interface ISqliteMetadataWorkflowStore
 {
     Task<SqliteWorkflowResult> CreateWriteIntentAsync(
@@ -190,5 +210,16 @@ public interface ISqliteMetadataWorkflowStore
     Task<SqliteClaimOutboxResult> ClaimOutboxAsync(
         IDbConnection connection,
         SqliteClaimOutboxRequest request,
+        CancellationToken cancellationToken = default);
+}
+
+public interface ISqliteMetadataInspector
+{
+    Task<IReadOnlyList<SqliteInvariantViolation>> CheckInvariantsAsync(
+        IDbConnection connection,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<SqliteRepairReadinessCandidate>> ListRepairReadinessAsync(
+        IDbConnection connection,
         CancellationToken cancellationToken = default);
 }
